@@ -134,6 +134,135 @@ html.amoled-mode #config-menu {
 
 #config-menu {
     z-index: 10050;
+    width: 24rem;
+    max-width: calc(100vw - 1.5rem);
+}
+
+#config-menu:not(.hidden) {
+    display: flex;
+    flex-direction: column;
+}
+
+#config-menu > :not(.settings-content) {
+    flex-shrink: 0;
+}
+
+.settings-tabs {
+    display: flex;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.settings-tabs [role="tab"] {
+    flex: 1;
+    padding: 0.625rem 0.5rem;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #64748b;
+    transition: color 150ms, border-color 150ms;
+}
+
+.settings-tabs [aria-selected="true"] {
+    color: var(--color-primary);
+    border-bottom-color: currentColor;
+}
+
+.settings-tabs button:hover {
+    color: var(--color-primary);
+}
+
+.settings-tabs button:focus-visible,
+.settings-panel:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -2px;
+}
+
+.settings-content {
+    /* Overlapping panels reserve the natural height of the tallest tab. */
+    display: grid;
+}
+
+.settings-panel {
+    grid-area: 1 / 1;
+    align-self: start;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.settings-panel[aria-hidden="true"] {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.settings-display-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.settings-display-controls button {
+    justify-content: flex-start;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.5rem;
+    border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+    border-radius: 0.5rem;
+    font-family: inherit;
+    color: #475569;
+}
+
+.settings-display-controls button:hover {
+    border-color: var(--color-primary);
+}
+
+.settings-display-controls button[aria-pressed="true"] {
+    color: var(--color-primary);
+    border-color: currentColor;
+    background-color: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.settings-display-controls button > :first-child {
+    flex-shrink: 0;
+}
+
+.settings-control-label {
+    font-size: 0.75rem;
+    color: inherit;
+    text-align: left;
+}
+
+@media (prefers-color-scheme: dark) {
+    .settings-tabs [role="tab"],
+    .settings-display-controls button {
+        color: #94a3b8;
+    }
+
+    .settings-tabs [aria-selected="true"],
+    .settings-tabs button:hover,
+    .settings-display-controls button[aria-pressed="true"] {
+        color: #a99aff;
+    }
+}
+
+html.amoled-mode .settings-tabs [aria-selected="true"],
+html.amoled-mode .settings-tabs button:hover,
+html.amoled-mode .settings-display-controls button {
+    color: var(--amoled-reader-fg);
+}
+
+#config-menu > nav {
+    margin-top: 1rem;
+    padding-bottom: 0;
+}
+
+.settings-email-hint:has(~ :not([hidden])) {
+    display: none;
 }
 
 html.amoled-mode #config-menu button.bg-primary\/10 {

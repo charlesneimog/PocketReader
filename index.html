@@ -452,13 +452,14 @@
         <!-- Config Menu -->
         <div
             id="config-menu"
-            class="fixed hidden bottom-24 w-96 max-h-[88vh] overflow-y-auto left-1/2 -translate-x-1/2 sm:translate-x-0 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 z-20 shadow-2xl"
+            class="fixed hidden bottom-24 w-96 left-1/2 -translate-x-1/2 sm:translate-x-0 bg-gray-100 dark:bg-gray-800 rounded-lg p-4 z-20 shadow-2xl"
         >
-            <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center justify-between mb-3">
                 <h2 class="text-xl font-bold text-slate-800 dark:text-slate-200">Settings</h2>
                 <div class="flex items-center gap-2">
                     <button
                         id="config-menu-close"
+                        aria-label="Close settings"
                         class="p-1 rounded-full text-slate-500 dark:text-slate-400 hover:text-primary dark:hover:text-primary"
                         type="button"
                     >
@@ -466,277 +467,298 @@
                     </button>
                 </div>
             </div>
-            <div class="space-y-6">
-                <div>
-                    <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
-                        Change voice language
-                    </label>
-                    <select
-                        id="voice-select"
-                        class="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 p-2"
-                    ></select>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
-                        Adjust reading speed
-                    </label>
-                    <div class="flex items-center gap-4">
-                        <button
-                            id="btn-speed-decrease"
-                            type="button"
-                            aria-label="Decrease reading speed"
-                            class="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-                        >
-                            <span class="material-symbols-outlined text-lg">remove</span>
-                        </button>
-                        <input
-                            id="reading-speed"
-                            type="range"
-                            min="0.5"
-                            max="2"
-                            step="0.1"
-                            value="1"
-                            class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-blue-500"
-                        />
-                        <button
-                            id="btn-speed-increase"
-                            type="button"
-                            aria-label="Increase reading speed"
-                            class="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
-                        >
-                            <span class="material-symbols-outlined text-lg">add</span>
-                        </button>
+            <div class="settings-tabs" role="tablist" aria-label="Settings categories">
+                <button id="settings-tab-audio" type="button" role="tab" aria-selected="true"
+                    aria-controls="settings-panel-audio" tabindex="0">Audio</button>
+                <button id="settings-tab-display" type="button" role="tab" aria-selected="false"
+                    aria-controls="settings-panel-display" tabindex="-1">Display</button>
+                <button id="settings-tab-emails" type="button" role="tab" aria-selected="false"
+                    aria-controls="settings-panel-emails" tabindex="-1">Emails</button>
+            </div>
+            <div class="settings-content">
+                <div id="settings-panel-audio" class="settings-panel" role="tabpanel"
+                    aria-labelledby="settings-tab-audio" tabindex="0">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                            Change voice language
+                        </label>
+                        <select
+                            id="voice-select"
+                            class="w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 p-2"
+                        ></select>
                     </div>
-                    <div id="reading-speed-value" class="text-center text-sm text-gray-500 dark:text-gray-400 mt-2">
-                        1.0x
-                    </div>
-                </div>
 
-                <div id="reading-reminder-section" hidden
-                    class="rounded-lg border border-slate-300 bg-white/50 p-3 dark:border-slate-700 dark:bg-black/30">
-                    <label class="flex items-start gap-3">
-                        <input id="reading-reminder-enabled" type="checkbox" disabled class="mt-1 h-5 w-5" />
-                        <span class="text-sm text-slate-700 dark:text-slate-200">Reading reminders</span>
-                    </label>
-                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        A daily email if you haven't read today, based on synced activity.
-                    </p>
-                    <label class="mt-2 block text-sm text-slate-700 dark:text-slate-200">
-                        Reminder time (your local timezone)
-                        <input id="reading-reminder-time" type="time" value="19:00" disabled
-                            class="rounded border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-black/30" />
-                    </label>
-                    <p id="reading-reminder-status" aria-live="polite"
-                        class="mt-2 text-xs text-slate-500 dark:text-slate-400">Sign in to configure reminders.</p>
-                </div>
-
-                <div
-                    id="reading-digest-email-section"
-                    hidden
-                    class="rounded-lg border border-slate-300 bg-white/50 p-3 dark:border-slate-700 dark:bg-black/30"
-                >
-                    <label class="flex items-start gap-3">
-                        <input
-                            id="reading-digest-email"
-                            type="checkbox"
-                            checked
-                            disabled
-                            class="mt-1 h-5 w-5"
-                        />
-                        <span class="min-w-0">
-                            <span class="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                                Reading summary emails
-                            </span>
-                            <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-                                Weekly on Saturday, monthly on day 1, and yearly on December 31.
-                            </span>
-                        </span>
-                    </label>
-                    <p
-                        id="reading-digest-email-status"
-                        class="mt-2 text-xs text-slate-500 dark:text-slate-400"
-                        aria-live="polite"
-                    >
-                        Sign in to configure email summaries.
-                    </p>
-                </div>
-
-                <!--
-                 !  ╭───────────────────────────────────╮
-                 !  │            Cronometro             │
-                 !  ╰───────────────────────────────────╯
-                -->
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
-                        >Auto-stop Timer</label
-                    >
-                    <div
-                        class="flex items-center justify-between gap-4 bg-white/50 dark:bg-black/30 p-3 rounded-lg border border-slate-300 dark:border-slate-700"
-                    >
-                        <div class="flex items-center gap-2">
-                            <span class="material-symbols-outlined text-slate-600 dark:text-slate-400">timer</span>
-                            <div
-                                class="flex items-center rounded-lg border border-slate-300 dark:border-slate-600 overflow-hidden bg-white/70 dark:bg-black/20"
+                    <div>
+                        <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                            Adjust reading speed
+                        </label>
+                        <div class="flex items-center gap-4">
+                            <button
+                                id="btn-speed-decrease"
+                                type="button"
+                                aria-label="Decrease reading speed"
+                                class="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
                             >
-                                <button
-                                    id="btn-timer-decrease"
-                                    type="button"
-                                    aria-label="Decrease timer by one minute"
-                                    class="w-9 h-9 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+                                <span class="material-symbols-outlined text-lg">remove</span>
+                            </button>
+                            <input
+                                id="reading-speed"
+                                type="range"
+                                min="0.5"
+                                max="2"
+                                step="0.1"
+                                value="1"
+                                class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full appearance-none cursor-pointer accent-blue-500"
+                            />
+                            <button
+                                id="btn-speed-increase"
+                                type="button"
+                                aria-label="Increase reading speed"
+                                class="w-9 h-9 flex items-center justify-center rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+                            >
+                                <span class="material-symbols-outlined text-lg">add</span>
+                            </button>
+                        </div>
+                        <div id="reading-speed-value" class="text-center text-sm text-gray-500 dark:text-gray-400 mt-2">
+                            1.0x
+                        </div>
+                    </div>
+
+                    <!--
+                     !  ╭───────────────────────────────────╮
+                     !  │            Cronometro             │
+                     !  ╰───────────────────────────────────╯
+                    -->
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
+                            >Auto-stop Timer</label
+                        >
+                        <div
+                            class="flex items-center justify-between gap-4 bg-white/50 dark:bg-black/30 p-3 rounded-lg border border-slate-300 dark:border-slate-700"
+                        >
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-slate-600 dark:text-slate-400">timer</span>
+                                <div
+                                    class="flex items-center rounded-lg border border-slate-300 dark:border-slate-600 overflow-hidden bg-white/70 dark:bg-black/20"
                                 >
-                                    <span class="material-symbols-outlined text-lg">remove</span>
+                                    <button
+                                        id="btn-timer-decrease"
+                                        type="button"
+                                        aria-label="Decrease timer by one minute"
+                                        class="w-9 h-9 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+                                    >
+                                        <span class="material-symbols-outlined text-lg">remove</span>
+                                    </button>
+                                    <input
+                                        class="w-14 bg-transparent text-center text-slate-800 dark:text-slate-200 text-xl font-semibold p-0 border-0 focus:ring-0"
+                                        inputmode="numeric"
+                                        id="stopwatch-input"
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        value="15"
+                                        aria-label="Auto-stop time in minutes"
+                                    />
+                                    <button
+                                        id="btn-timer-increase"
+                                        type="button"
+                                        aria-label="Increase timer by one minute"
+                                        class="w-9 h-9 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+                                    >
+                                        <span class="material-symbols-outlined text-lg">add</span>
+                                    </button>
+                                </div>
+                                <span class="text-sm font-medium text-slate-500 dark:text-slate-400">min</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button
+                                    id="btn-timer-play"
+                                    class="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-md"
+                                >
+                                    <span class="material-symbols-outlined text-2xl">play_arrow</span>
                                 </button>
-                                <input
-                                    class="w-14 bg-transparent text-center text-slate-800 dark:text-slate-200 text-xl font-semibold p-0 border-0 focus:ring-0"
-                                    inputmode="numeric"
-                                    id="stopwatch-input"
-                                    type="number"
-                                    min="1"
-                                    step="1"
-                                    value="15"
-                                    aria-label="Auto-stop time in minutes"
-                                />
                                 <button
-                                    id="btn-timer-increase"
-                                    type="button"
-                                    aria-label="Increase timer by one minute"
-                                    class="w-9 h-9 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10"
+                                    id="btn-timer-stop"
+                                    class="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-800 dark:text-slate-200 flex items-center justify-center shadow-md"
                                 >
-                                    <span class="material-symbols-outlined text-lg">add</span>
+                                    <span class="material-symbols-outlined text-2xl">stop</span>
                                 </button>
                             </div>
-                            <span class="text-sm font-medium text-slate-500 dark:text-slate-400">min</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button
-                                id="btn-timer-play"
-                                class="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-md"
-                            >
-                                <span class="material-symbols-outlined text-2xl">play_arrow</span>
-                            </button>
-                            <button
-                                id="btn-timer-stop"
-                                class="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 text-slate-800 dark:text-slate-200 flex items-center justify-center shadow-md"
-                            >
-                                <span class="material-symbols-outlined text-2xl">stop</span>
-                            </button>
                         </div>
                     </div>
+
                 </div>
-
-                <!--
-                 !  ╭───────────────────────────────────╮
-                 !  │              Buttons              │
-                 !  ╰───────────────────────────────────╯
-                -->
-                <div class="flex items-center gap-1">
-                    <button
-                        id="toggle-original-subtitles"
-                        title="Show original-language subtitles"
-                        aria-label="Show original-language subtitles"
-                        aria-pressed="false"
-                        class="flex items-center justify-center rounded p-2"
-                    >
-                        <span
-                            class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                <div id="settings-panel-display" class="settings-panel" role="tabpanel"
+                    aria-labelledby="settings-tab-display" tabindex="0" aria-hidden="true" inert>
+                    <!--
+                     !  ╭───────────────────────────────────╮
+                     !  │              Buttons              │
+                     !  ╰───────────────────────────────────╯
+                    -->
+                    <div class="settings-display-controls">
+                        <button
+                            id="toggle-original-subtitles"
+                            title="Show original-language subtitles"
+                            aria-label="Show original-language subtitles"
+                            aria-pressed="false"
+                            class="flex items-center justify-center rounded p-2"
                         >
-                            subtitles_off
-                        </span>
-                    </button>
+                            <span
+                                class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                            >
+                                subtitles_off
+                            </span>
+                            <span class="settings-control-label">Original subtitles</span>
+                        </button>
 
-                    <div aria-hidden="true" class="mx-1 h-6 w-px bg-slate-300 dark:bg-slate-700"></div>
-
-                    <button
-                        id="toggle-fullscreen"
-                        title="Toggle Fullscreen mode"
-                        class="flex items-center justify-center rounded p-2"
-                    >
-                        <span
-                            class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                        <button
+                            id="toggle-fullscreen"
+                            title="Toggle Fullscreen mode"
+                            class="flex items-center justify-center rounded p-2"
                         >
-                            fullscreen
-                        </span>
-                    </button>
+                            <span
+                                class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                            >
+                                fullscreen
+                            </span>
+                            <span class="settings-control-label">Fullscreen</span>
+                        </button>
 
-                    <button
-                        id="toggle-text-width-fit"
-                        title="Maximize focused PDF text width"
-                        aria-label="Maximize focused PDF text width"
-                        aria-pressed="false"
-                        class="flex items-center justify-center rounded p-2"
-                    >
-                        <span
-                            class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                        <button
+                            id="toggle-text-width-fit"
+                            title="Maximize focused PDF text width"
+                            aria-label="Maximize focused PDF text width"
+                            aria-pressed="false"
+                            class="flex items-center justify-center rounded p-2"
                         >
-                            fit_screen
-                        </span>
-                    </button>
+                            <span
+                                class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                            >
+                                fit_screen
+                            </span>
+                            <span class="settings-control-label">Fit PDF text</span>
+                        </button>
 
-                    <button
-                        id="lock-screen"
-                        title="Lock screen orientation"
-                        class="flex items-center justify-center rounded p-2"
-                    >
-                        <span
-                            class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                        <button
+                            id="lock-screen"
+                            title="Lock screen orientation"
+                            class="flex items-center justify-center rounded p-2"
                         >
-                            screen_lock_rotation
-                        </span>
-                    </button>
+                            <span
+                                class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                            >
+                                screen_lock_rotation
+                            </span>
+                            <span class="settings-control-label">Orientation lock</span>
+                        </button>
 
-                    <div aria-hidden="true" class="mx-1 h-6 w-px bg-slate-300 dark:bg-slate-700"></div>
-
-                    <button
-                        id="toggle-amoled-mode"
-                        title="Toggle AMOLED black mode"
-                        aria-label="Toggle AMOLED black mode"
-                        aria-pressed="false"
-                        class="flex items-center justify-center rounded p-2"
-                    >
-                        <span
-                            class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                        <button
+                            id="toggle-amoled-mode"
+                            title="Toggle AMOLED black mode"
+                            aria-label="Toggle AMOLED black mode"
+                            aria-pressed="false"
+                            class="flex items-center justify-center rounded p-2"
                         >
-                            contrast
-                        </span>
-                    </button>
+                            <span
+                                class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                            >
+                                contrast
+                            </span>
+                            <span class="settings-control-label">AMOLED mode</span>
+                        </button>
 
-                    <button
-                        id="amoled-text-color"
-                        title="Cycle AMOLED reader text brightness"
-                        aria-label="Cycle AMOLED reader text brightness"
-                        class="flex items-center justify-center rounded p-2"
-                        type="button"
-                    >
-                        <span
-                            id="amoled-text-color-swatch"
-                            class="block h-5 w-5 rounded-full border border-slate-400 dark:border-slate-600"
-                        ></span>
-                    </button>
-
-                    <div aria-hidden="true" class="mx-1 h-6 w-px bg-slate-300 dark:bg-slate-700"></div>
-
-                    <button
-                        id="toogle-help"
-                        title="Show help menu"
-                        class="flex items-center justify-center rounded p-2"
-                    >
-                        <span
-                            class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                        <button
+                            id="amoled-text-color"
+                            title="Cycle AMOLED reader text brightness"
+                            aria-label="Cycle AMOLED reader text brightness"
+                            class="flex items-center justify-center rounded p-2"
+                            type="button"
                         >
-                            help
-                        </span>
-                    </button>
+                            <span
+                                id="amoled-text-color-swatch"
+                                class="block h-5 w-5 rounded-full border border-slate-400 dark:border-slate-600"
+                            ></span>
+                            <span class="settings-control-label">Text brightness</span>
+                        </button>
+
+                        <button
+                            id="toogle-help"
+                            title="Show help menu"
+                            class="flex items-center justify-center rounded p-2"
+                        >
+                            <span
+                                class="material-symbols-outlined text-lg text-slate-600 dark:text-slate-300 hover:text-primary dark:hover:text-primary"
+                            >
+                                help
+                            </span>
+                            <span class="settings-control-label">Help</span>
+                        </button>
+                    </div>
+
                 </div>
+                <div id="settings-panel-emails" class="settings-panel" role="tabpanel"
+                    aria-labelledby="settings-tab-emails" tabindex="0" aria-hidden="true" inert>
+                        <p class="settings-email-hint text-sm text-slate-500 dark:text-slate-400">
+                            Sign in from the account menu to configure reading reminders and summary emails.
+                        </p>
+                    <div id="reading-reminder-section" hidden
+                        class="rounded-lg border border-slate-300 bg-white/50 p-3 dark:border-slate-700 dark:bg-black/30">
+                        <label class="flex items-start gap-3">
+                            <input id="reading-reminder-enabled" type="checkbox" disabled class="mt-1 h-5 w-5" />
+                            <span class="text-sm text-slate-700 dark:text-slate-200">Reading reminders</span>
+                        </label>
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            A daily email if you haven't read today, based on synced activity.
+                        </p>
+                        <label class="mt-2 block text-sm text-slate-700 dark:text-slate-200">
+                            Reminder time (your local timezone)
+                            <input id="reading-reminder-time" type="time" value="19:00" disabled
+                                class="rounded border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-black/30" />
+                        </label>
+                        <p id="reading-reminder-status" aria-live="polite"
+                            class="mt-2 text-xs text-slate-500 dark:text-slate-400">Sign in to configure reminders.</p>
+                    </div>
 
-                <nav
-                    class="flex justify-center gap-4 border-t border-slate-300 dark:border-slate-700 p-3 text-xs"
-                    aria-label="Legal"
-                >
-                    <a class="text-primary hover:underline" href="./privacy.html">Privacy Policy</a>
-                    <a class="text-primary hover:underline" href="./terms.html">Terms of Service</a>
-                </nav>
+                    <div
+                        id="reading-digest-email-section"
+                        hidden
+                        class="rounded-lg border border-slate-300 bg-white/50 p-3 dark:border-slate-700 dark:bg-black/30"
+                    >
+                        <label class="flex items-start gap-3">
+                            <input
+                                id="reading-digest-email"
+                                type="checkbox"
+                                checked
+                                disabled
+                                class="mt-1 h-5 w-5"
+                            />
+                            <span class="min-w-0">
+                                <span class="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                                    Reading summary emails
+                                </span>
+                                <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                                    Weekly on Saturday, monthly on day 1, and yearly on December 31.
+                                </span>
+                            </span>
+                        </label>
+                        <p
+                            id="reading-digest-email-status"
+                            class="mt-2 text-xs text-slate-500 dark:text-slate-400"
+                            aria-live="polite"
+                        >
+                            Sign in to configure email summaries.
+                        </p>
+                    </div>
+
+                </div>
             </div>
+            <nav
+                class="flex justify-center gap-4 border-t border-slate-300 dark:border-slate-700 p-3 text-xs"
+                aria-label="Legal"
+            >
+                <a class="text-primary hover:underline" href="./privacy.html">Privacy Policy</a>
+                <a class="text-primary hover:underline" href="./terms.html">Terms of Service</a>
+            </nav>
         </div>
 
         <!-- Help Overlay -->
@@ -1524,6 +1546,33 @@
                     } finally {
                         e.target.value = "";
                     }
+                });
+
+                const settingsTabs = [...settingsMenu.querySelectorAll('[role="tab"]')];
+                const activateSettingsTab = (selectedTab) => {
+                    for (const tab of settingsTabs) {
+                        const selected = tab === selectedTab;
+                        tab.setAttribute("aria-selected", String(selected));
+                        tab.tabIndex = selected ? 0 : -1;
+                        const panel = document.getElementById(tab.getAttribute("aria-controls"));
+                        panel.setAttribute("aria-hidden", String(!selected));
+                        panel.inert = !selected;
+                    }
+                };
+                settingsTabs.forEach((tab, index) => {
+                    tab.addEventListener("click", () => activateSettingsTab(tab));
+                    tab.addEventListener("keydown", (event) => {
+                        let nextIndex;
+                        if (event.key === "ArrowRight") nextIndex = (index + 1) % settingsTabs.length;
+                        else if (event.key === "ArrowLeft") nextIndex = (index - 1 + settingsTabs.length) % settingsTabs.length;
+                        else if (event.key === "Home") nextIndex = 0;
+                        else if (event.key === "End") nextIndex = settingsTabs.length - 1;
+                        else return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        activateSettingsTab(settingsTabs[nextIndex]);
+                        settingsTabs[nextIndex].focus();
+                    });
                 });
 
                 // Toggle settings modal
