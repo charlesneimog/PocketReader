@@ -124,6 +124,24 @@ Put the domain where the selfhost will be accessible in the `Server Link` in the
 
 To enable browser-to-Drive sync, follow [the Google Drive registration guide](assets/GOOGLE_DRIVE_SETUP.md). Users can then choose **Continue with Google** in the cloud configuration panel.
 
+### Reading reminders
+
+Sign in to your self-hosted account, then enable **Settings → Reading reminders** and
+choose a daily time (default 19:00). Reminders use your browser's timezone and the
+same SMTP configuration as password recovery. They are off by default per account.
+
+The server sends a short email with a link to `PUBLIC_APP_URL` when there is no synced
+reading activity for that local day. Use a full `https://` or `http://` URL. Reading
+while offline may still result in a reminder until your activity syncs.
+
+The server checks every 60 seconds and records deliveries in SQLite to avoid repeat
+emails for the same local date, including after restarts. If the server starts after
+your chosen time, it can send that day's reminder before midnight; previous days are
+not caught up. Failed SMTP sends are retried on a later check. An interrupted send
+may be skipped to avoid duplicates. Set `READING_REMINDER_ENABLED=false` to disable
+reminders for the deployment; `READING_REMINDER_POLL_SECONDS` controls polling
+(minimum 60 seconds). The server must be running and SMTP configured for delivery.
+
 ### Reading summary emails
 
 Self-hosted accounts receive reading summaries through the same SMTP configuration used for password recovery:

@@ -66,6 +66,8 @@ export class SyncManager {
     authSignup(...args) { return this.server.authSignup(...args); }
     requestPasswordReset(...args) { return this.server.requestPasswordReset(...args); }
     resetPassword(...args) { return this.server.resetPassword(...args); }
+    getReadingReminderPreference(...args) { return this.server.getReadingReminderPreference(...args); }
+    updateReadingReminderPreference(...args) { return this.server.updateReadingReminderPreference(...args); }
     getReadingDigestPreference(...args) { return this.server.getReadingDigestPreference(...args); }
     updateReadingDigestPreference(...args) { return this.server.updateReadingDigestPreference(...args); }
     clearAuthToken(...args) { return this.server.clearAuthToken(...args); }

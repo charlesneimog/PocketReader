@@ -28,6 +28,10 @@ export class ControlsManager {
         this.speedSelectValue = document.getElementById("reading-speed-value");
         this.btnDecreaseSpeed = document.getElementById("btn-speed-decrease");
         this.btnIncreaseSpeed = document.getElementById("btn-speed-increase");
+        this.readingReminderSection = document.getElementById("reading-reminder-section");
+        this.readingReminderToggle = document.getElementById("reading-reminder-enabled");
+        this.readingReminderTime = document.getElementById("reading-reminder-time");
+        this.readingReminderStatus = document.getElementById("reading-reminder-status");
         this.readingDigestEmailSection = document.getElementById("reading-digest-email-section");
         this.readingDigestEmailToggle = document.getElementById("reading-digest-email");
         this.readingDigestEmailStatus = document.getElementById("reading-digest-email-status");
@@ -451,6 +455,12 @@ export class ControlsManager {
             });
         }
 
+        this.readingReminderToggle?.addEventListener("change", () => {
+            void this._saveReadingReminderPreference();
+        });
+        this.readingReminderTime?.addEventListener("change", () => {
+            void this._saveReadingReminderPreference();
+        });
         this.readingDigestEmailToggle?.addEventListener("change", () => {
             this._saveReadingDigestPreference(this.readingDigestEmailToggle.checked);
         });
@@ -465,6 +475,7 @@ export class ControlsManager {
     }
 
     async refreshReadingDigestPreference() {
+        void this.refreshReadingReminderPreference();
         const toggle = this.readingDigestEmailToggle;
         const status = this.readingDigestEmailStatus;
         if (!toggle || !status) return;
@@ -500,6 +511,70 @@ export class ControlsManager {
             toggle.disabled = true;
             status.textContent = "Email preference is unavailable.";
             console.warn("[ReadingDigest] Unable to load preference", error);
+        }
+    }
+
+    async refreshReadingReminderPreference() {
+        const toggle = this.readingReminderToggle;
+        const time = this.readingReminderTime;
+        const status = this.readingReminderStatus;
+        if (!toggle || !time || !status) return;
+        const hasServer = !!this.app.serverSync?.getServerUrl?.();
+        this.readingReminderSection.hidden = !hasServer;
+        toggle.disabled = time.disabled = true;
+        this.readingReminderPreference = null;
+        if (!hasServer || !localStorage.getItem("localreaderAuthToken")) {
+            toggle.checked = false;
+            status.textContent = "Sign in to configure reminders.";
+            return;
+        }
+        status.textContent = "Loading reminders…";
+        try {
+            let preference = await this.app.serverSync.getReadingReminderPreference();
+            const timezone = this._getBrowserTimezone();
+            if (preference.enabled && preference.timezone !== timezone) {
+                preference = await this.app.serverSync.updateReadingReminderPreference({ ...preference, timezone });
+            }
+            this._reflectReadingReminderPreference(preference);
+            toggle.disabled = time.disabled = false;
+        } catch (error) {
+            status.textContent = "Reading reminders are unavailable.";
+            console.warn("[ReadingReminder] Unable to load preference", error);
+        }
+    }
+
+    _reflectReadingReminderPreference(preference) {
+        this.readingReminderPreference = preference;
+        this.readingReminderToggle.checked = preference.enabled;
+        this.readingReminderTime.value = preference.time;
+        this.readingReminderStatus.textContent = preference.enabled
+            ? `Daily email at ${preference.time} (${preference.timezone}), if you haven't read.`
+            : "Reading reminders are turned off.";
+    }
+
+    async _saveReadingReminderPreference() {
+        const toggle = this.readingReminderToggle;
+        const time = this.readingReminderTime;
+        const previous = this.readingReminderPreference;
+        if (!previous) return;
+        if (!time.value || !time.checkValidity()) {
+            time.reportValidity();
+            this._reflectReadingReminderPreference(previous);
+            return;
+        }
+        toggle.disabled = time.disabled = true;
+        this.readingReminderStatus.textContent = "Saving reminder…";
+        try {
+            const preference = await this.app.serverSync.updateReadingReminderPreference({
+                enabled: toggle.checked, time: time.value, timezone: this._getBrowserTimezone(),
+            });
+            this._reflectReadingReminderPreference(preference);
+        } catch (error) {
+            this._reflectReadingReminderPreference(previous);
+            this.readingReminderStatus.textContent = "Unable to save reminder. Your previous setting is unchanged.";
+            console.warn("[ReadingReminder] Unable to save preference", error);
+        } finally {
+            toggle.disabled = time.disabled = false;
         }
     }
 

@@ -211,6 +211,18 @@ def init_db():
 
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS reading_reminder_preferences (
+            owner_email TEXT PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            timezone TEXT NOT NULL DEFAULT 'UTC',
+            time TEXT NOT NULL DEFAULT '19:00',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS email_digest_preferences (
             owner_email TEXT PRIMARY KEY,
             enabled INTEGER NOT NULL DEFAULT 1,
@@ -1501,6 +1513,46 @@ def update_reward_state(owner_email, snapshot):
     return True
 
 
+def get_reading_reminder_preference(owner_email):
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        row = conn.execute(
+            "SELECT enabled, timezone, time FROM reading_reminder_preferences WHERE owner_email = ?",
+            (_normalize_email(owner_email),),
+        ).fetchone()
+    if not row:
+        return {"enabled": False, "timezone": "UTC", "time": "19:00"}
+    return {"enabled": bool(row[0]), "timezone": row[1], "time": row[2]}
+
+
+def update_reading_reminder_preference(owner_email, enabled, timezone_name, reminder_time):
+    owner_n = _normalize_email(owner_email)
+    if not owner_n or not isinstance(enabled, bool):
+        return False
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        conn.execute(
+            """
+            INSERT INTO reading_reminder_preferences (owner_email, enabled, timezone, time, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(owner_email) DO UPDATE SET
+                enabled = excluded.enabled, timezone = excluded.timezone,
+                time = excluded.time, updated_at = excluded.updated_at
+            """,
+            (owner_n, int(enabled), timezone_name, reminder_time, datetime.now(timezone.utc).isoformat()),
+        )
+    return True
+
+
+def list_reading_reminder_recipients():
+    with sqlite3.connect(DB_PATH, timeout=30) as conn:
+        rows = conn.execute(
+            """
+            SELECT p.owner_email, p.timezone, p.time FROM reading_reminder_preferences p
+            JOIN users ON users.email = p.owner_email WHERE p.enabled = 1
+            """
+        ).fetchall()
+    return [{"email": r[0], "timezone": r[1], "time": r[2]} for r in rows]
+
+
 def get_email_digest_preference(owner_email):
     """Return account-scoped digest settings, defaulting to enabled in UTC."""
     owner_n = _normalize_email(owner_email)
@@ -1570,7 +1622,7 @@ def list_email_digest_recipients():
 def claim_email_digest_delivery(owner_email, digest_type, period_key):
     """Atomically reserve one digest period so schedulers cannot double-send."""
     owner_n = _normalize_email(owner_email)
-    if not owner_n or digest_type not in {"weekly", "monthly", "yearly"} or not period_key:
+    if not owner_n or digest_type not in {"weekly", "monthly", "yearly", "reminder"} or not period_key:
         return False
     now = datetime.now(timezone.utc).isoformat()
     try:

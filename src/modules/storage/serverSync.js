@@ -152,6 +152,16 @@ export class ServerSync {
         return data;
     }
 
+    async getReadingReminderPreference() {
+        return await this.apiFetch("/api/reading-reminder-preferences", { method: "GET" });
+    }
+
+    async updateReadingReminderPreference(preference) {
+        return await this.apiFetch("/api/reading-reminder-preferences", {
+            method: "PUT", body: preference,
+        });
+    }
+
     async getReadingDigestPreference() {
         return await this.apiFetch("/api/reading-digest-preferences", {
             method: "GET",

@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import unicodedata
 import app
 from reading_digest_service import ReadingDigestService
+from reading_reminder_service import ReadingReminderService
 
 HOST = "0.0.0.0"
 PORT = 8000
@@ -595,6 +596,10 @@ class APIHandler(BaseHTTPRequestHandler):
         if not user_email:
             return
 
+        if path == "/api/reading-reminder-preferences":
+            self._send_json(200, app.get_reading_reminder_preference(user_email))
+            return
+
         if path == "/api/reading-digest-preferences":
             self._send_json(200, app.get_email_digest_preference(user_email))
             return
@@ -1106,6 +1111,26 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_error(400, f"Invalid JSON: {str(e)}")
             return
 
+        if path == "/api/reading-reminder-preferences":
+            if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
+                self._send_error(400, "Missing or invalid 'enabled' field")
+                return
+            timezone_name = data.get("timezone")
+            reminder_time = data.get("time")
+            if not isinstance(reminder_time, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", reminder_time):
+                self._send_error(400, "Time must be HH:MM in 24-hour format")
+                return
+            try:
+                if not isinstance(timezone_name, str):
+                    raise ValueError("Missing timezone")
+                ZoneInfo(timezone_name)
+            except (ZoneInfoNotFoundError, ValueError):
+                self._send_error(400, "Unknown IANA timezone")
+                return
+            app.update_reading_reminder_preference(user_email, data["enabled"], timezone_name, reminder_time)
+            self._send_json(200, app.get_reading_reminder_preference(user_email))
+            return
+
         if path == "/api/reading-digest-preferences":
             enabled = data.get("enabled")
             timezone_name = str(data.get("timezone") or "UTC").strip()
@@ -1282,6 +1307,21 @@ def main():
     logger.debug("API endpoints: POST /api/files, DELETE /api/files/{file_id}, PUT /api/files/{file_id}/position|voice|highlights")
     logger.debug("API endpoints: GET|PUT /api/reading-digest-preferences")
 
+    reminder_service = None
+    if _env_truthy(os.environ.get("READING_REMINDER_ENABLED", "true")):
+        if _smtp_is_configured():
+            reminder_service = ReadingReminderService(
+                repository=app,
+                send_email=_send_email_smtp,
+                app_name=os.environ.get("APP_NAME", "PocketReader"),
+                public_app_url=PUBLIC_APP_URL,
+                poll_interval_seconds=int(os.environ.get("READING_REMINDER_POLL_SECONDS", "60")),
+            )
+            reminder_service.start()
+            logger.info("Reading reminder scheduler started")
+        else:
+            logger.warning("Reading reminders enabled but SMTP is not configured")
+
     digest_service = None
     if _env_truthy(os.environ.get("READING_DIGEST_ENABLED", "true")):
         if _smtp_is_configured():
@@ -1308,6 +1348,8 @@ def main():
     finally:
         if digest_service:
             digest_service.stop()
+        if reminder_service:
+            reminder_service.stop()
 
 
 if __name__ == "__main__":
