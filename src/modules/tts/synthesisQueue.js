@@ -13,6 +13,9 @@ export class TTSQueueManager {
         const { state } = this.app;
         if (!state.generationEnabled) return;
         const sentence = state.sentences[idx];
+        if (priority && sentence?.audioReady && idx === state.currentSentenceIndex && !state.isPlaying) {
+            this.app.audioManager.playCurrentSentence();
+        }
         if (!sentence || sentence.audioReady || sentence.audioInProgress) return;
 
         if (!sentence.layoutProcessed) {
