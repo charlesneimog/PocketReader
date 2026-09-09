@@ -11,6 +11,41 @@ const merge = (boxes) =>
         boxes,
     );
 
+test("clicking an uncertain region or either plus only adds it as text", async () => {
+    const element = () => ({
+        style: {}, children: [], listeners: {},
+        setAttribute() {},
+        querySelector() { return null; },
+        appendChild(child) { this.children.push(child); },
+        addEventListener(type, listener) { this.listeners[type] = listener; },
+    });
+    const container = element();
+    const previousDocument = globalThis.document;
+    globalThis.document = { querySelector: () => container, createElement: element };
+    const detector = Object.create(PDFHeaderFooterDetector.prototype);
+    detector.app = { state: { viewportDisplayByPage: new Map([[1, { width: 100, height: 100 }]]) } };
+    const labels = [];
+    detector.setDetectionLabel = async (...args) => labels.push(args);
+    try {
+        detector._drawNotSureTextControls(1, [{
+            label: "not-sure-text", normalized: { left: 0, top: 0, right: 1, bottom: 1 },
+        }]);
+        const region = container.children[0].children[0];
+        for (const target of [region, ...region.children]) {
+            let prevented = false;
+            let stopped = false;
+            target.listeners.click({
+                preventDefault: () => { prevented = true; },
+                stopPropagation: () => { stopped = true; },
+            });
+            assert.ok(prevented && stopped);
+        }
+        assert.deepEqual(labels, [[1, 0, "text"], [1, 0, "text"], [1, 0, "text"]]);
+    } finally {
+        globalThis.document = previousDocument;
+    }
+});
+
 test("keeps text, section header, and following text as separate phrases", () => {
     const boxes = merge([
         { x1: 0, y1: 0, x2: 1000, y2: 600, label: "text" },

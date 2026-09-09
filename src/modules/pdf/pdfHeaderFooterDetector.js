@@ -710,13 +710,13 @@ export class PDFHeaderFooterDetector {
             region.style.top = `${(box.y1 / viewportDisplay.height) * 100}%`;
             region.style.width = `${(box.width / viewportDisplay.width) * 100}%`;
             region.style.height = `${(box.height / viewportDisplay.height) * 100}%`;
-            region.title = "Read this uncertain text";
-            region.setAttribute("aria-label", "Read this uncertain text");
+            region.title = "Add as text";
+            region.setAttribute("aria-label", "Add as text");
             region.addEventListener("click", (event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                this._readNotSureTextRegion(pageNumber, index, event).catch((error) => {
-                    console.warn("[Layout] Failed to read uncertain text region", error);
+                this.setDetectionLabel(pageNumber, index, "text").catch((error) => {
+                    console.warn("[Layout] Failed to add uncertain region as text", error);
                 });
             });
 

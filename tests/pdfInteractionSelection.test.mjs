@@ -5,6 +5,23 @@ import { InteractionHandler } from "../src/modules/ui/interactionHandler.js";
 
 const handler = () => Object.create(InteractionHandler.prototype);
 
+test("uncertain layout taps do not select a phrase or begin text selection", async () => {
+    const interaction = handler();
+    interaction.app = { state: { currentDocumentType: "pdf", viewMode: "full" } };
+    const event = {
+        button: 0,
+        target: {
+            closest(selector) {
+                assert.ok(selector.includes(".not-sure-layout-region"));
+                return this;
+            },
+        },
+    };
+    await interaction.handlePointerClick(event);
+    interaction._startPdfDragSelection(event);
+    assert.equal(interaction._textSelect, undefined);
+});
+
 const line = (number) => {
     const words = ["one", "two", "three", "four"].map((text, index) => ({
         text: `${number}-${text}`,
