@@ -1,4 +1,4 @@
-const APP_VERSION = "0.45.1+0";
+const APP_VERSION = "0.46.0+0";
 const IDB_VERSION = 1;
 const cacheName = `PocketReader-v${APP_VERSION}`;
 const runtimeCache = `PocketReader-runtime-v${APP_VERSION}`;
@@ -95,8 +95,11 @@ const staticFiles = [
     "/src/modules/pdf/pdfHeaderFooterDetector.js",
     "/src/modules/pdf/sentenceParser.js",
     "/src/modules/pdf/ts.js",
+    "/src/modules/phrases/phraseSplitVersions.js",
+    "/src/modules/phrases/parentheses.js",
     "/src/modules/epub/epubLoader.js",
     "/src/modules/epub/epubRenderer.js",
+    "/src/modules/epub/sentenceSegmentation.js",
     "/src/modules/storage/pdfThumbnailCache.js",
     "/src/modules/storage/googleDriveSync.js",
     "/src/modules/storage/serverSync.js",

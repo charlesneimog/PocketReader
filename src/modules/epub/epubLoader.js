@@ -1,8 +1,8 @@
 import { EVENTS } from "../../constants/events.js";
 import { compare as compareCFI } from "./../../../thirdparty/foliate-js/epubcfi.js";
 import { EPUBRenderer } from "./epubRenderer.js";
-import { splitSegmentsOnSemicolons } from "./sentenceSegmentation.js";
-import { usesSemicolonPhraseBoundaries } from "../phrases/phraseSplitVersions.js";
+import { mergeSegmentsInsideParentheses, splitSegmentsOnSemicolons } from "./sentenceSegmentation.js";
+import { ignoresParenthesizedPunctuation, usesSemicolonPhraseBoundaries } from "../phrases/phraseSplitVersions.js";
 
 export class EPUBLoader {
     constructor(app) {
@@ -444,9 +444,13 @@ export class EPUBLoader {
         if (!fullText.trim()) return [];
 
         const segmenter = this._getSentenceSegmenter(locale);
-        const sentenceSegments = segmenter ? segmenter(fullText) : this._fallbackSegment(fullText);
+        const ignoreParenthesizedPunctuation = ignoresParenthesizedPunctuation(this.app.state.phraseSplitVersion);
+        const originalSegments = segmenter ? segmenter(fullText) : this._fallbackSegment(fullText);
+        const sentenceSegments = ignoreParenthesizedPunctuation
+            ? mergeSegmentsInsideParentheses(fullText, originalSegments)
+            : originalSegments;
         const segments = usesSemicolonPhraseBoundaries(this.app.state.phraseSplitVersion)
-            ? splitSegmentsOnSemicolons(fullText, sentenceSegments)
+            ? splitSegmentsOnSemicolons(fullText, sentenceSegments, { ignoreParenthesizedPunctuation })
             : sentenceSegments;
         if (!segments.length) return [];
 

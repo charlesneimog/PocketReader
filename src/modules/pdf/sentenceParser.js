@@ -1,4 +1,5 @@
-import { usesSemicolonPhraseBoundaries } from "../phrases/phraseSplitVersions.js";
+import { ignoresParenthesizedPunctuation, usesSemicolonPhraseBoundaries } from "../phrases/phraseSplitVersions.js";
+import { getParenthesisDepths } from "../phrases/parentheses.js";
 
 export class SentenceParser {
     constructor(app) {
@@ -39,6 +40,7 @@ export class SentenceParser {
         const { app } = this;
         const { config, state } = app;
         const splitOnEverySemicolon = usesSemicolonPhraseBoundaries(state.phraseSplitVersion);
+        const protectParentheses = ignoresParenthesizedPunctuation(state.phraseSplitVersion);
         const abbreviations = ["Mr", "Mrs", "Ms", "Dr", "Prof", "Sr", "Jr", "e.g", "i.e.", "etc", "Fig", "p", "al"];
         let sentenceIndex = state.sentences.length; // Continue from existing sentences
 
@@ -73,8 +75,10 @@ export class SentenceParser {
             return { x, y, width, height };
         };
 
-        function isSentenceEnd(wordStr, nextWordStr, currentBufferLength = 0) {
+        function isSentenceEnd(wordStr, nextWordStr, currentBufferLength = 0, parenthesisDepths = null) {
             const token = String(wordStr || "").trim();
+            const ending = token.match(sentenceEndRegex);
+            if (ending && parenthesisDepths?.[ending.index] > 0) return false;
             const w = token.replace(sentenceEndRegex, "");
             const bare = String(w)
                 .replace(/[.!?…:;]+$/g, "")
@@ -164,6 +168,7 @@ export class SentenceParser {
 
         let buffer = [];
         let bufferLayoutBlockKey = null;
+        let parenthesisDepth = 0;
         let lastY = null;
         let lastHeight = null;
 
@@ -212,6 +217,7 @@ export class SentenceParser {
             state.pageSentencesIndex.get(pageNumber).push(sentence.index);
             buffer = [];
             bufferLayoutBlockKey = null;
+            parenthesisDepth = 0;
         };
 
         for (let i = 0; i < wordsToProcess.length; i++) {
@@ -264,7 +270,13 @@ export class SentenceParser {
             buffer.push(w);
 
             const nextWord = wordsToProcess[i + 1]?.str || "";
-            if (isSentenceEnd(w.str, nextWord, buffer.length) || (config.BREAK_ON_LINE && w.lineBreak)) {
+            const token = String(w.str || "").trim();
+            const parenthesisDepths = protectParentheses ? getParenthesisDepths(token, parenthesisDepth) : null;
+            if (parenthesisDepths) parenthesisDepth = parenthesisDepths[token.length];
+            if (
+                isSentenceEnd(token, nextWord, buffer.length, parenthesisDepths) ||
+                (config.BREAK_ON_LINE && w.lineBreak)
+            ) {
                 flush();
             }
 

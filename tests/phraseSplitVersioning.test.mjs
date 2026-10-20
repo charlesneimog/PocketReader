@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
     CURRENT_PHRASE_SPLIT_VERSION,
     PHRASE_SPLIT_HISTORY,
+    ignoresParenthesizedPunctuation,
 } from "../src/modules/phrases/phraseSplitVersions.js";
 import { HighlightsStorage } from "../src/modules/storage/highlightsStorage.js";
 import { AudioManager } from "../src/modules/tts/audioManager.js";
@@ -11,10 +12,17 @@ import { AudioManager } from "../src/modules/tts/audioManager.js";
 test("keeps an append-only phrase split history with the current version", () => {
     assert.deepEqual(
         PHRASE_SPLIT_HISTORY.map(({ version }) => version),
-        [1, 2],
+        [1, 2, 3],
     );
-    assert.equal(CURRENT_PHRASE_SPLIT_VERSION, 2);
+    assert.equal(CURRENT_PHRASE_SPLIT_VERSION, 3);
     assert.equal(Object.isFrozen(PHRASE_SPLIT_HISTORY), true);
+});
+
+test("protects parenthesized punctuation only in the new phrase split version", () => {
+    assert.equal(ignoresParenthesizedPunctuation(1), false);
+    assert.equal(ignoresParenthesizedPunctuation(2), false);
+    assert.equal(ignoresParenthesizedPunctuation(3), true);
+    assert.equal(ignoresParenthesizedPunctuation(undefined), true);
 });
 
 test("treats unversioned highlights as version 1 and stamps new highlights", () => {
