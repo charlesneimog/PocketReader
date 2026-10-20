@@ -1,7 +1,6 @@
 import {
     getWebsiteRoot,
     cooperativeYield,
-    delay,
     normalizeText,
     formatTextToSpeech,
     hasUsableSpeechText,
@@ -10,6 +9,7 @@ import {
 } from "../utils/helpers.js";
 import { EVENTS } from "../../constants/events.js";
 import { INFERENCE_BACKENDS, normalizeInferenceBackend } from "../../config.js";
+import { ServerTtsClient } from "./serverTtsClient.js";
 import {
     PiperWorkerPoolClient,
     getCachedJSON,
@@ -38,42 +38,128 @@ export class TTSEngine {
         this._pdfPhrasePrefetchRequestId = 0;
         this._restartAttemptedCount = 0;
         this._resetPromise = null;
+        this._lifetime = 0;
+        this._generation = 0;
+        this._generationController = new AbortController();
+        this._settingsRevision = 0;
+        this.serverEnabled = !!app.state.serverTtsEnabled;
+        this.provider = null;
+        this._serverFailed = false;
+        this._fallbackPromise = null;
 
         const scriptSrc = (document.currentScript && document.currentScript.src) || window.location.href;
         const scriptDir = scriptSrc.substring(0, scriptSrc.lastIndexOf("/"));
         const baseUrl = scriptDir.replace(/\/thirdparty\/piper$/, "");
         this.baseUrl = baseUrl;
 
-        this.huggingFaceRoot = "https://huggingface.co/rhasspy/piper-voices/resolve/main/";
         this.initialized = false;
     }
 
     async getVoicesLists() {
-        const url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/voices.json";
-        const cache = await caches.open("piper-voices-v1");
-
+        const url = `${getWebsiteRoot()}assets/tts-voices.json`;
+        let response;
         try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error("Network response not ok");
-            }
-            await cache.put(url, response.clone());
-            return await response.json();
+            response = await fetch(url);
+            if (!response.ok) throw new Error("Voice catalogue unavailable");
         } catch (err) {
-            const cached = await cache.match(url);
-            if (cached) {
-                return await cached.json();
-            }
-            const cachedFromAnyAppCache = await caches.match(url);
-            if (cachedFromAnyAppCache) {
-                const response = cachedFromAnyAppCache.clone();
-                await cache.put(url, response.clone()).catch(() => {});
-                return await response.json();
-            }
-            const error = new Error("Failed to fetch voices.json and no cache available");
+            response = await globalThis.caches?.match(url);
+        }
+        if (!response?.ok) {
+            const error = new Error("Voice catalogue is not cached. Connect once before reading offline.");
             error.code = TTS_OFFLINE_UNAVAILABLE;
             throw error;
         }
+        const manifest = await response.json();
+        if (!/^[a-f0-9]{40}$/.test(manifest.revision) || !manifest.voices) {
+            throw new Error("Invalid voice catalogue");
+        }
+        this.modelRevision = manifest.revision;
+        this.huggingFaceRoot = `https://huggingface.co/rhasspy/piper-voices/resolve/${manifest.revision}/`;
+        return manifest.voices;
+    }
+
+    _abortError() {
+        return new DOMException("Speech request cancelled", "AbortError");
+    }
+
+    _assertLifetime(lifetime) {
+        if (lifetime !== this._lifetime) throw this._abortError();
+    }
+
+    cancelSynthesis() {
+        this._generation++;
+        this._pdfPhrasePrefetchRequestId++;
+        this._generationController.abort();
+        this._generationController = new AbortController();
+    }
+
+    async _releaseVoice() {
+        this._lifetime++;
+        this._settingsRevision++;
+        this.cancelSynthesis();
+        const client = this.client;
+        this.client = null;
+        this.initialized = false;
+        this.initializingPromise = null;
+        this.pendingVoiceId = null;
+        this.voiceId = null;
+        this.provider = null;
+        this._fallbackPromise = null;
+        this.app.state.piperInstance = null;
+        this.app.state.currentPiperVoice = null;
+        if (client instanceof ServerTtsClient) await client.close();
+        else client?.terminate?.();
+    }
+
+    async beginDocument() {
+        this.app.state.generationEnabled = false;
+        await this._resetPromise;
+        await this.deactivate();
+        this._serverFailed = false;
+    }
+
+    async deactivate() {
+        this.app.state.generationEnabled = false;
+        this.app.state.autoAdvanceActive = false;
+        this.app.ttsQueue?.reset();
+        await Promise.all([this._releaseVoice(), this.app.audioManager?.stopPlayback?.(true)]);
+        this.app.controlsManager?.reflectTtsProvider?.("local");
+    }
+
+    async setServerEnabled(enabled) {
+        this.serverEnabled = !!enabled;
+        this.app.state.serverTtsEnabled = this.serverEnabled;
+        localStorage.setItem("config.serverTtsEnabled", this.serverEnabled ? "1" : "0");
+        this.app.controlsManager?.reflectServerTtsEnabled?.(this.serverEnabled);
+        this._serverFailed = false;
+        await this.resetEngine({ preservePlayback: false, announce: false });
+        await this.reconfigure();
+    }
+
+    async reconfigure() {
+        const revision = ++this._settingsRevision;
+        this.app.ttsQueue?.reset();
+        await this.app.audioManager?.stopPlayback?.(true);
+        if (revision !== this._settingsRevision) return;
+        const { state } = this.app;
+        state.autoAdvanceActive = false;
+        this.app.cache?.clearAllAudioCache?.();
+        if (!state.generationEnabled || !state.sentences.length) return;
+        const voice = document.getElementById("voice-select")?.value || this.preferredVoiceId || this.voiceId;
+        this.preferredVoiceId = voice;
+        const client = await this.ensurePiper(voice);
+        if (revision !== this._settingsRevision) return;
+        if (client instanceof ServerTtsClient) {
+            const lifetime = this._lifetime;
+            try {
+                await client.configure({ voiceId: this.voiceId, lengthScale: state.CURRENT_SPEED });
+            } catch (error) {
+                this._assertLifetime(lifetime);
+                if (revision !== this._settingsRevision || error.name === "AbortError") return;
+                await this._fallbackToLocal(this.voiceId, lifetime);
+            }
+        }
+        if (revision === this._settingsRevision) this.schedulePrefetch();
     }
 
     _isOfflineTtsUnavailableError(error) {
@@ -150,40 +236,85 @@ export class TTSEngine {
     async ensurePiper(voiceId) {
         const { state, config } = this.app;
         const targetVoiceId = this._getActiveVoiceId(voiceId || config.DEFAULT_PIPER_VOICE);
+        const lifetime = this._lifetime;
+        if (this._fallbackPromise) {
+            await this._fallbackPromise;
+            this._assertLifetime(lifetime);
+        }
 
-        if (this.initialized && this.voiceId === targetVoiceId && state.piperInstance) {
+        while (this.initializingPromise) {
+            await this.initializingPromise.catch(() => {});
+            this._assertLifetime(lifetime);
+        }
+        if (this.initialized && this.voiceId === targetVoiceId && state.piperInstance &&
+            (!(this.client instanceof ServerTtsClient) || this.client.ready)) {
             return state.piperInstance;
         }
 
         this.app.ui.showInfo("Loading AI Natural Voices...");
-        if (this.initializingPromise) {
-            if (this.pendingVoiceId && this.pendingVoiceId !== targetVoiceId) {
-                await this.initializingPromise.catch(() => {});
-            } else {
-                await this.initializingPromise;
-                return state.piperInstance;
-            }
-        }
-
         this.pendingVoiceId = targetVoiceId;
-        this.initializingPromise = this._initializeVoice(targetVoiceId)
+        const initialization = this._initializeVoice(targetVoiceId, lifetime)
             .then(async () => {
+                this._assertLifetime(lifetime);
                 await this.initVoices();
                 return state.piperInstance;
-            })
-            .finally(() => {
-                this.pendingVoiceId = null;
             });
+        this.initializingPromise = initialization;
 
         try {
-            return await this.initializingPromise;
+            return await initialization;
         } finally {
-            this.app.ui.showInfo("AI Natural Voices Loaded!");
-            this.initializingPromise = null;
+            if (this.initializingPromise === initialization) {
+                this.pendingVoiceId = null;
+                this.initializingPromise = null;
+            }
         }
     }
 
-    async _initializeVoice(voiceId) {
+    async _initializeVoice(voiceId, lifetime) {
+        if (!this.voices && !this._isPersonalizedPiperEnabled()) {
+            const voices = await this.getVoicesLists();
+            this._assertLifetime(lifetime);
+            this.voices = voices;
+        }
+        this._assertLifetime(lifetime);
+        if (this.serverEnabled && !this._serverFailed && !this._isPersonalizedPiperEnabled()) {
+            const client = this.client instanceof ServerTtsClient ? this.client : new ServerTtsClient(this.app);
+            this.client = client;
+            this.provider = "server";
+            this.app.controlsManager?.reflectTtsProvider?.("loading");
+            try {
+                const settings = { voiceId, lengthScale: this.app.state.CURRENT_SPEED, modelRevision: this.modelRevision };
+                if (this.initialized) await client.configure(settings);
+                else await client.init(settings);
+                this._assertLifetime(lifetime);
+                this._commitVoice(client, voiceId, "server");
+                return client;
+            } catch (error) {
+                await client.close();
+                this._assertLifetime(lifetime);
+                if (error.name === "AbortError") throw error;
+                this.client = null;
+                this.initialized = false;
+                this._serverFailed = true;
+                this.app.ui.showInfo("Server speech unavailable; using this device.");
+            }
+        }
+        return this._initializeLocalVoice(voiceId, lifetime);
+    }
+
+    _commitVoice(client, voiceId, provider) {
+        this.client = client;
+        this.provider = provider;
+        this.voiceId = voiceId;
+        this.initialized = true;
+        client.availableVoices = this.voices;
+        this.app.state.piperInstance = client;
+        this.app.state.currentPiperVoice = voiceId;
+        this.app.controlsManager?.reflectTtsProvider?.(provider);
+    }
+
+    async _initializeLocalVoice(voiceId, lifetime) {
         const { ui, state } = this.app;
         const targetVoiceId = this._getActiveVoiceId(voiceId);
         ui.updatePlayButton(state.playerState.LOADING);
@@ -205,6 +336,7 @@ export class TTSEngine {
                     },
                 });
             }
+            const client = this.client;
 
             const usesPersonalizedModel = this._isPersonalizedPiperEnabled();
             if (usesPersonalizedModel) {
@@ -247,14 +379,16 @@ export class TTSEngine {
                 const modelUrl = this.huggingFaceRoot + modelFile;
                 const configUrl = this.huggingFaceRoot + configFile;
 
-                modelBuffer = await getCachedModel(modelFile, modelUrl, {
+                const modelKey = `${this.modelRevision}/${modelFile}`;
+                modelBuffer = await getCachedModel(modelKey, modelUrl, {
                     onProgress: (pct) => ui.showMessage(`Downloading model: ${pct.toFixed(2)}%`, 1200),
                 });
                 // Re-read the model from IndexedDB for the second worker so both
                 // workers can initialize together without cloning the first buffer.
-                modelBufferFactory = () => getCachedModel(modelFile, modelUrl);
-                voiceConfig = await getCachedJSON(configFile, configUrl);
+                modelBufferFactory = () => getCachedModel(modelKey, modelUrl);
+                voiceConfig = await getCachedJSON(`${this.modelRevision}/${configFile}`, configUrl);
             }
+            this._assertLifetime(lifetime);
 
             const baseUrl = getWebsiteRoot();
             const ortJsUrl = `${baseUrl}thirdparty/ort/ort.js`;
@@ -267,9 +401,9 @@ export class TTSEngine {
             const useWebGpu = backend === INFERENCE_BACKENDS.WEBGPU;
 
             if (!this.initialized) {
-                const workerLabel = this.client.size === 1 ? "AI voice worker" : `${this.client.size} AI voice workers`;
+                const workerLabel = client.size === 1 ? "AI voice worker" : `${client.size} AI voice workers`;
                 ui.updateBookLoading?.(`Initializing ${workerLabel}…`);
-                const runtime = await this.client.init({
+                const runtime = await client.init({
                     modelBuffer,
                     voiceConfig,
                     ortJsUrl,
@@ -294,7 +428,7 @@ export class TTSEngine {
                     });
                 }
             } else if (this.voiceId !== targetVoiceId) {
-                const runtime = await this.client.changeVoice({
+                const runtime = await client.changeVoice({
                     modelBuffer,
                     voiceConfig,
                     modelBufferFactory,
@@ -303,14 +437,12 @@ export class TTSEngine {
                 console.info(`[TTS] Piper voice loaded; backend=${runtime.backend || "unknown"}`);
             }
 
-            this.voiceId = targetVoiceId;
-            this.initialized = true;
-            state.piperInstance = this.client;
-            state.currentPiperVoice = targetVoiceId;
-            state.piperInstance.availableVoices = this.voices;
+            this._assertLifetime(lifetime);
+            this._commitVoice(client, targetVoiceId, "local");
 
             return state.piperInstance;
         } catch (err) {
+            if (lifetime !== this._lifetime) throw this._abortError();
             console.error("Failed to initialize Piper:", err);
             this.initialized = false;
             this.voiceId = null;
@@ -324,8 +456,56 @@ export class TTSEngine {
             this.client = null;
             throw err;
         } finally {
-            document.body.style.cursor = "default";
-            ui.updatePlayButton(state.playerState.DONE);
+            if (lifetime === this._lifetime) {
+                document.body.style.cursor = "default";
+                ui.updatePlayButton(state.playerState.DONE);
+            }
+        }
+    }
+
+    async _fallbackToLocal(voiceId, lifetime) {
+        this._assertLifetime(lifetime);
+        if (this.provider === "local" && this.initialized) return this.client;
+        if (!this._fallbackPromise) {
+            this._serverFailed = true;
+            const remote = this.client;
+            this.client = null;
+            this.initialized = false;
+            this.app.state.piperInstance = null;
+            this._fallbackPromise = (async () => {
+                await remote?.close?.();
+                this._assertLifetime(lifetime);
+                this.app.ui.showInfo("Server speech unavailable; using this device for this book.");
+                return this._initializeLocalVoice(voiceId, lifetime);
+            })();
+        }
+        const fallback = this._fallbackPromise;
+        try {
+            return await fallback;
+        } finally {
+            if (this._fallbackPromise === fallback) this._fallbackPromise = null;
+        }
+    }
+
+    async _synthesizePhrase(text, voiceId, task) {
+        let client = await this.ensurePiper(voiceId);
+        this._assertTask(task);
+        const options = { createBlob: true, signal: task.signal };
+        try {
+            return await client.synthesize(text, task.speed, undefined, options);
+        } catch (error) {
+            this._assertTask(task);
+            if (!(client instanceof ServerTtsClient)) throw error;
+            client = await this._fallbackToLocal(voiceId, task.lifetime);
+            this._assertTask(task);
+            return client.synthesize(text, task.speed, undefined, options);
+        }
+    }
+
+    _assertTask(task) {
+        if (task.signal.aborted || task.generation !== this._generation || task.lifetime !== this._lifetime ||
+            !this.app.state.generationEnabled || this.app.state.sentences[task.index] !== task.sentence) {
+            throw this._abortError();
         }
     }
 
@@ -505,32 +685,21 @@ export class TTSEngine {
         return wordBoundaries;
     }
 
-    async buildPiperAudio(sentence, voice, text) {
+    _audioCacheKey(voice, speed, text) {
+        return `${this.modelRevision || "custom"}|${voice}|${speed}|${text}`;
+    }
+
+    async buildPiperAudio(sentence, voice, text, task) {
         const { state, config } = this.app;
         const activeVoice = this._getActiveVoiceId(voice);
 
-        async function retryAsync(fn, tries = 3, gap = 300) {
-            let last;
-            for (let i = 0; i < tries; i++) {
-                try {
-                    return await fn();
-                } catch (e) {
-                    last = e;
-                    if (i < tries - 1) await delay(gap);
-                }
-            }
-            throw last;
-        }
-
         await this.ensureAudioContext();
-        const client = await this.ensurePiper(activeVoice);
-        if (!client) {
-            sentence.audioError = new Error("Piper voice unavailable");
-            return;
-        }
+        await this.ensurePiper(activeVoice);
+        this._assertTask(task);
         await cooperativeYield();
 
         const rawPhraseEntries = await this._getSpeechPhraseEntries(sentence, text);
+        this._assertTask(task);
         const phraseEntries = rawPhraseEntries
             .map((entry) => ({
                 text: normalizeText(entry?.text || ""),
@@ -557,35 +726,24 @@ export class TTSEngine {
             const phrase = phraseEntries[i].text;
             const cleaned = formatTextToSpeech(phrase);
             console.info(`[TTS] Rendering phrase: ${JSON.stringify(cleaned)}`);
-            const { blob: wavBlob, wavBuffer } = await retryAsync(async () => {
-                try {
-                    const activeClient = this.app.state.piperInstance || client;
-                    if (!activeClient) throw new Error("Piper worker unavailable");
-                    const createBlob = !config.STORE_DECODED_ONLY || config.MAKE_WAV_COPY;
-                    const result = await activeClient.synthesize(cleaned, state.CURRENT_SPEED, undefined, {
-                        createBlob,
-                    });
-                    return result;
-                } catch (e) {
-                    await this.ensurePiper(activeVoice);
-                    throw e;
-                } finally {
-                    document.body.style.cursor = "default";
-                }
-            });
+            const result = await this._synthesizePhrase(cleaned, activeVoice, task);
+            this._assertTask(task);
+            const { blob: audioBlob, mimeType = "audio/wav" } = result;
+            const encodedBuffer = result.encodedBuffer || result.wavBuffer;
 
             let bufferForDecode = null;
-            if (wavBuffer instanceof ArrayBuffer) {
-                bufferForDecode = wavBuffer;
-            } else if (wavBuffer?.buffer instanceof ArrayBuffer) {
-                bufferForDecode = wavBuffer.buffer.slice(0);
-            } else if (wavBlob?.arrayBuffer) {
-                bufferForDecode = await wavBlob.arrayBuffer();
+            if (encodedBuffer instanceof ArrayBuffer) {
+                bufferForDecode = encodedBuffer;
+            } else if (ArrayBuffer.isView(encodedBuffer)) {
+                bufferForDecode = encodedBuffer.buffer.slice(encodedBuffer.byteOffset, encodedBuffer.byteOffset + encodedBuffer.byteLength);
+            } else if (audioBlob?.arrayBuffer) {
+                bufferForDecode = await audioBlob.arrayBuffer();
             } else {
                 throw new Error("Invalid audio buffer returned from Piper worker");
             }
 
             const decoded = await this.safeDecodeAudioData(bufferForDecode.slice(0));
+            this._assertTask(task);
             decodedSpeechBuffers.push(decoded);
             buffersForPlayback.push(decoded);
             ttsPhraseTimings.push({
@@ -596,7 +754,7 @@ export class TTSEngine {
             phraseOffsetMs += decoded.duration * 1000;
 
             if (!effectiveBlob && phraseEntries.length === 1) {
-                effectiveBlob = wavBlob || new Blob([bufferForDecode], { type: "audio/wav" });
+                effectiveBlob = audioBlob || new Blob([bufferForDecode], { type: mimeType });
             }
 
             if (pauseSec > 0 && i < phraseEntries.length - 1) {
@@ -609,14 +767,16 @@ export class TTSEngine {
 
         const decoded = this._concatAudioBuffers(buffersForPlayback);
         const wordBoundaries = this._buildWordBoundariesForAudio(phrases, decodedSpeechBuffers, decoded, pauseSec);
+        this._assertTask(task);
+        const wavBlob = config.MAKE_WAV_COPY && effectiveBlob?.type === "audio/wav" ? effectiveBlob : null;
 
         if (!this._isPersonalizedPiperEnabled()) {
-            const cacheKey = `${activeVoice}|${state.CURRENT_SPEED}|${sentence.normalizedText}`;
+            const cacheKey = this._audioCacheKey(activeVoice, task.speed, sentence.normalizedText);
             state.audioCache.set(cacheKey, {
                 // HTMLAudioElement is the playback source. Retain the worker's
                 // WAV so sentence transitions do not re-encode the AudioBuffer.
                 audioBlob: effectiveBlob,
-                wavBlob: config.MAKE_WAV_COPY ? effectiveBlob : null,
+                wavBlob,
                 audioBuffer: decoded,
                 wordBoundaries,
                 ttsPhraseTimings,
@@ -625,11 +785,11 @@ export class TTSEngine {
 
         Object.assign(sentence, {
             audioBlob: effectiveBlob,
-            wavBlob: config.MAKE_WAV_COPY ? effectiveBlob : null,
+            wavBlob,
             audioBuffer: decoded,
             audioReady: true,
             lastVoice: activeVoice,
-            lastSpeed: state.CURRENT_SPEED,
+            lastSpeed: task.speed,
             prefetchQueued: false,
             audioError: null,
             wordBoundaries,
@@ -641,135 +801,70 @@ export class TTSEngine {
 
     async synthesizeSequential(idx) {
         const { state, config } = this.app;
-        if (!state.generationEnabled) return;
-        const s = state.sentences[idx];
-        if (!s) return;
-        if (!s.isTextToRead) {
-            return;
-        }
-        if (s.audioInProgress) return;
-
-        const baseText = s.readableText && s.readableText.trim().length ? s.readableText : s.text;
-        if (!baseText || !baseText.trim().length) {
-            s.audioError = new Error("No readable text available for synthesis");
-            return;
-        }
-
-        const sourceText = await this.app.getSentenceSpeechText?.(idx, baseText);
-        if (!sourceText || !sourceText.trim().length) {
-            s.audioError = new Error("No speech text available for synthesis");
-            return;
-        }
-
-        if (this.app.isReadTranslationEnabled?.()) {
-            try {
+        const sentence = state.sentences[idx];
+        if (!state.generationEnabled || !sentence?.isTextToRead || sentence.audioInProgress) return;
+        const task = {
+            index: idx,
+            sentence,
+            speed: state.CURRENT_SPEED,
+            generation: this._generation,
+            lifetime: this._lifetime,
+            signal: this._generationController.signal,
+        };
+        sentence.audioInProgress = true;
+        sentence.audioError = null;
+        try {
+            const baseText = sentence.readableText?.trim() || sentence.text;
+            const text = this.app.getSentenceSpeechText
+                ? await this.app.getSentenceSpeechText(idx, baseText)
+                : baseText;
+            this._assertTask(task);
+            if (!text?.trim()) throw new Error("No speech text available for synthesis");
+            if (this.app.isReadTranslationEnabled?.()) {
                 await this.app.ensureReadTranslationVoiceReady?.();
-            } catch (err) {
-                console.warn("[TTS] Failed to align voice with translation target", err);
+                this._assertTask(task);
             }
-        }
-
-        const voiceSelect = document.getElementById("voice-select");
-        const voice = this._getActiveVoiceId(
-            voiceSelect?.value || this.preferredVoiceId || config.DEFAULT_PIPER_VOICE,
-        );
-
-        if (!hasUsableSpeechText(sourceText)) {
-            this._markSentenceAsSilent(s);
-            return;
-        }
-
-        const norm = normalizeText(sourceText);
-        const requiresPdfPhraseTimings =
-            state.currentDocumentType === "pdf" &&
-            config.SPLIT_PDF_AUDIO_ON_LAYOUT_BLOCKS &&
-            Array.isArray(s.readableWords) &&
-            s.readableWords.length > 1;
-        const hasPhraseTimings = Array.isArray(s.ttsPhraseTimings) && s.ttsPhraseTimings.length > 0;
-
-        if (
-            s.audioReady &&
-            s.lastVoice === voice &&
-            s.lastSpeed === state.CURRENT_SPEED &&
-            typeof s.normalizedText === "string" &&
-            s.normalizedText === norm &&
-            (!requiresPdfPhraseTimings || hasPhraseTimings)
-        ) {
-            return;
-        }
-
-        s.normalizedText = norm;
-        const cacheKey = `${voice}|${state.CURRENT_SPEED}|${norm}`;
-        if (!this._isPersonalizedPiperEnabled() && state.audioCache.has(cacheKey)) {
-            const cached = state.audioCache.get(cacheKey);
-            const cachedPhraseTimings = cached.ttsPhraseTimings || [];
-            if (requiresPdfPhraseTimings && !cachedPhraseTimings.length) {
-                state.audioCache.delete(cacheKey);
-            } else {
-                Object.assign(s, {
-                    audioBlob: cached.audioBlob || null,
-                    wavBlob: cached.wavBlob || null,
-                    audioBuffer: cached.audioBuffer,
-                    audioReady: true,
-                    lastVoice: voice,
-                    lastSpeed: state.CURRENT_SPEED,
-                    audioError: null,
-                    audioInProgress: false,
-                    prefetchQueued: false,
-                    wordBoundaries: cached.wordBoundaries || [],
-                    ttsPhraseTimings: cachedPhraseTimings,
-                });
-                s._restartRetryCount = 0;
-                delete s._restartAttempted;
+            const voice = this._getActiveVoiceId(
+                document.getElementById("voice-select")?.value || this.preferredVoiceId || config.DEFAULT_PIPER_VOICE,
+            );
+            if (!hasUsableSpeechText(text)) {
+                this._markSentenceAsSilent(sentence);
                 return;
             }
-        }
+            const normalized = normalizeText(text);
+            const needsTimings = state.currentDocumentType === "pdf" && config.SPLIT_PDF_AUDIO_ON_LAYOUT_BLOCKS &&
+                sentence.readableWords?.length > 1;
+            if (sentence.audioReady && sentence.lastVoice === voice && sentence.lastSpeed === task.speed &&
+                sentence.normalizedText === normalized && (!needsTimings || sentence.ttsPhraseTimings?.length)) return;
 
-        s.audioInProgress = true;
-        s.audioError = null;
-
-        this.app.eventBus.emit(EVENTS.TTS_SYNTHESIS_START, { index: idx });
-
-        try {
-            await this.buildPiperAudio(s, voice, sourceText);
-            this.app.eventBus.emit(EVENTS.TTS_SYNTHESIS_COMPLETE, { index: idx });
-        } catch (err) {
-            s.audioError = err;
-            if (this._isOfflineTtsUnavailableError(err)) {
-                this._handleOfflineTtsUnavailable(s, err);
-                this.app.eventBus.emit(EVENTS.TTS_SYNTHESIS_ERROR, { index: idx, error: err });
-                throw err;
-            }
-            const retryCount = (Number.isFinite(s._restartRetryCount) ? s._restartRetryCount : 0) + 1;
-            s._restartRetryCount = retryCount;
-            const reason = err?.message || "unknown synthesis error";
-            this.app.ui.showMessage(
-                `TTS warning: restarting engine (attempt ${retryCount}). Audio generation will keep retrying. If this continues, reloading the page will help.`,
-                3200,
-            );
-            this.app.eventBus.emit(EVENTS.TTS_SYNTHESIS_ERROR, { index: idx, error: err });
-            try {
-                await this.resetEngine({
-                    clearCache: true,
-                    reason,
-                    preservePlayback: true,
-                    attempt: retryCount,
+            sentence.normalizedText = normalized;
+            const key = this._audioCacheKey(voice, task.speed, normalized);
+            const cached = !this._isPersonalizedPiperEnabled() && state.audioCache.get(key);
+            if (cached && (!needsTimings || cached.ttsPhraseTimings?.length)) {
+                Object.assign(sentence, {
+                    ...cached,
+                    audioReady: true,
+                    lastVoice: voice,
+                    lastSpeed: task.speed,
+                    audioError: null,
+                    prefetchQueued: false,
                 });
-                const retrySentence = this.app.state.sentences[idx];
-                if (retrySentence) {
-                    retrySentence.audioError = null;
-                    retrySentence.audioInProgress = false;
-                }
-                if (this.app.state.generationEnabled && this.app.ttsQueue) {
-                    this.app.ttsQueue.add(idx, true);
-                    this.app.ttsQueue.run();
-                }
-            } catch (resetErr) {
-                console.error("Failed to reset TTS engine:", resetErr);
+                return;
             }
-            throw err;
+            this.app.eventBus.emit(EVENTS.TTS_SYNTHESIS_START, { index: idx });
+            await this.buildPiperAudio(sentence, voice, text, task);
+        } catch (error) {
+            if (error.name !== "AbortError" && task.generation === this._generation &&
+                state.sentences[idx] === sentence) {
+                sentence.audioError = error;
+                if (this._isOfflineTtsUnavailableError(error)) this._handleOfflineTtsUnavailable(sentence, error);
+                else this.app.ui.showMessage(`Unable to generate speech: ${error.message}`, 3200);
+            }
+            throw error;
         } finally {
-            s.audioInProgress = false;
+            if (task.generation === this._generation && state.sentences[idx] === sentence) {
+                sentence.audioInProgress = false;
+            }
         }
     }
 
@@ -966,24 +1061,8 @@ export class TTSEngine {
                 : null;
 
         this._resetPromise = (async () => {
-            if (this.initializingPromise) {
-                try {
-                    await this.initializingPromise.catch(() => {});
-                } catch {}
-            }
-            this.initializingPromise = null;
-            this.pendingVoiceId = null;
-
-            if (this.client) {
-                try {
-                    this.client.terminate();
-                } catch (err) {
-                    console.warn("Failed to terminate Piper worker:", err);
-                }
-            }
-            this.client = null;
-            this.initialized = false;
-            this.voiceId = null;
+            this.app.ttsQueue?.reset();
+            await this._releaseVoice();
 
             const shouldRecycleAudioContext = !preservePlayback || !state.isPlaying;
             if (state.audioCtx && shouldRecycleAudioContext) {

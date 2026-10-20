@@ -1,3 +1,5 @@
+import { readingSpeedToLengthScale } from "../tts/readingSpeed.js";
+
 export class ControlsManager {
     constructor(app) {
         this.app = app;
@@ -23,6 +25,8 @@ export class ControlsManager {
     _cacheDOMElements() {
         this.serverLinkInput = document.getElementById("server-link");
         this.voiceSelect = document.getElementById("voice-select");
+        this.serverTtsToggle = document.getElementById("server-tts-enabled");
+        this.ttsProviderStatus = document.getElementById("tts-provider-status");
         this.textWidthFitToggle = document.getElementById("toggle-text-width-fit");
         this.speedSelect = document.getElementById("reading-speed");
         this.speedSelectValue = document.getElementById("reading-speed-value");
@@ -306,12 +310,21 @@ export class ControlsManager {
             this.showInfo(next ? "Maximize reading text: ON" : "Maximize reading text: OFF", 1500);
         });
 
-        on(this.voiceSelect, "change", () => {
-            app.audioManager.stopPlayback(true);
-            app.state.autoAdvanceActive = false;
-            app.cache.clearAudioFrom(app.state.currentSentenceIndex);
-            app.ttsEngine.schedulePrefetch();
+        const reconfigureSpeech = async () => {
+            try {
+                await app.ttsEngine.reconfigure();
+            } catch (error) {
+                if (error.name !== "AbortError") this.showInfo(`Unable to update speech: ${error.message}`);
+            }
+        };
+        on(this.serverTtsToggle, "change", async () => {
+            try {
+                await app.ttsEngine.setServerEnabled(this.serverTtsToggle.checked);
+            } catch (error) {
+                if (error.name !== "AbortError") this.showInfo(`Unable to update speech: ${error.message}`);
+            }
         });
+        on(this.voiceSelect, "change", reconfigureSpeech);
 
         if (this.speedSelect) {
             const updateSpeedDisplay = () => {
@@ -323,14 +336,10 @@ export class ControlsManager {
             on(this.btnDecreaseSpeed, "click", () => this._adjustReadingSpeed(-1));
             on(this.btnIncreaseSpeed, "click", () => this._adjustReadingSpeed(1));
 
-            on(this.speedSelect, "change", () => {
-                const val = parseFloat(this.speedSelect.value);
-                app.state.CURRENT_SPEED = Math.abs(isNaN(val) ? 1.0 : val - 2); // original logic preserved
-                app.audioManager.stopPlayback(true);
-                app.state.autoAdvanceActive = false;
-                app.cache.clearAudioFrom(app.state.currentSentenceIndex);
-                app.ttsEngine.schedulePrefetch();
+            on(this.speedSelect, "change", async () => {
+                app.state.CURRENT_SPEED = readingSpeedToLengthScale(this.speedSelect.value);
                 updateSpeedDisplay();
+                await reconfigureSpeech();
             });
 
             // Initialize display
@@ -452,6 +461,11 @@ export class ControlsManager {
                     localStorage.removeItem("config.serverLink");
                 }
                 void this.refreshReadingDigestPreference();
+                if (app.ttsEngine?.serverEnabled) {
+                    void app.ttsEngine.setServerEnabled(true).catch((error) => {
+                        if (error.name !== "AbortError") this.showInfo(`Unable to update speech server: ${error.message}`);
+                    });
+                }
             });
         }
 
@@ -472,6 +486,23 @@ export class ControlsManager {
         } catch {
             return "UTC";
         }
+    }
+
+    reflectServerTtsEnabled(enabled) {
+        if (this.serverTtsToggle) this.serverTtsToggle.checked = !!enabled;
+    }
+
+    reflectTtsProvider(provider, detail = "") {
+        if (!this.ttsProviderStatus) return;
+        const labels = {
+            server: "Speech: server",
+            local: "Speech: this device",
+            device: "Speech: this device",
+            loading: "Connecting to speech server…",
+            unavailable: "Server unavailable; speech uses this device",
+        };
+        this.ttsProviderStatus.textContent = detail || labels[provider] || "Speech: this device";
+        this.ttsProviderStatus.dataset.provider = provider || "local";
     }
 
     async refreshReadingDigestPreference() {

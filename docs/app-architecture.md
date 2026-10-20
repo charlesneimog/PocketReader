@@ -18,7 +18,7 @@ The important distinction is ownership:
 | Layout policy | `PDFHeaderFooterDetector` | Owns layout requests, caching, readable-region decisions, and layout UI. |
 | Layout inference | `src/modules/pdf/ts.js` worker | Owns the Transformers.js model and processor only. |
 | EPUB presentation | `EPUBLoader` / `EPUBRenderer` | Uses Foliate and CFI-based annotations instead of PDF geometry. |
-| Speech generation | `TTSEngine` and Piper workers | Loads voices, synthesizes audio, and records phrase/word timing. |
+| Speech generation | `TTSEngine`, Piper workers, optional `ServerTtsClient` | Selects device or server synthesis and records phrase/word timing on the client. |
 | Speech scheduling | `TTSQueueManager` | Limits concurrency and refuses unreadable or unprocessed sentences. |
 | Playback | `AudioManager` | Plays decoded audio, advances sentences, and emits playback events. |
 | Pointer/selection input | `InteractionHandler` | Converts mouse coordinates into phrases or custom PDF text selections. |
@@ -35,7 +35,7 @@ The module-level `app` instance is created when `src/app.js` is imported.
 1. `PDFTTSApp.constructor()` creates UI helpers first, then config/state/event infrastructure, persistence, document loaders/renderers, and audio services.
 2. `_loadRuntimeSettings()` loads user settings and resolves the current TTS backend. `TTS_BACKEND` is an application setting, but smartphone compatibility may downgrade WebGPU to WASM.
 3. `initialize()` starts viewport tracking, installs accessibility regions, initializes rewards, and calls the initial document/gallery path.
-4. `closeCurrentDocument()` is the lifetime boundary. It stops playback/sync, releases document-specific objects and the lazy PDF layout worker, clears caches, and resets document state.
+4. `closeCurrentDocument()` is the lifetime boundary. It immediately invalidates speech requests, closes the server speech session or local Piper workers, stops playback/sync, releases document-specific objects and the lazy PDF layout worker, clears caches, and resets document state. Opening another book also releases the previous speech session.
 
 The layout detector is deliberately lazy. `getPdfHeaderFooterDetector()` constructs it only when PDF work requires it; `loadEPUB()` and `closeCurrentDocument()` release it. This prevents EPUB-only sessions from downloading or allocating the layout model.
 
@@ -163,6 +163,14 @@ PDFRenderer.renderSentence() / playback navigation
 ```
 
 `TTS_BACKEND` is `"wasm"` or `"webgpu"`; WASM is the default. Piper may report a runtime fallback (initialization failure or GPU device loss); the app then updates its resolved setting and can rebuild the engine. Layout and TTS backend choices are independent because they use different models, workers, and failure characteristics. `LAYOUT_DETECTION_BACKEND` also defaults to WASM, with WebGPU remaining an explicit opt-in.
+
+The optional **Use server speech when available** setting selects where speech is generated, independently of the device inference backend. `TTSEngine.ensurePiper()` prepares either a local worker pool or an authenticated `ServerTtsClient` session. Remote mode skips local model initialization. A server failure falls back to device speech for that book; opening another book or toggling the setting retries the server. Both paths select the same immutable Piper model/configuration revision from `assets/tts-voices.json`; local model cache keys include that revision.
+
+Document parsing, layout filtering, phrase splitting, translation preparation, pauses, and highlighting remain client responsibilities. The client sends cleaned phrase text and immutable voice/length-scale settings; `/api/tts/sessions/{id}/phrases` returns binary MP3. The client decodes it to derive the existing phrase/word timing data and retains the MP3 for playback. Reading-speed multipliers map to Piper length scale as `1 / multiplier`.
+
+`tts_service.py` owns a bounded set of per-reader subprocesses. Only those processes import Piper/ONNX, load models, and invoke FFmpeg. Closing a session or changing its voice terminates the process group and reaps the worker; pinned model files remain cached on disk. Heartbeats renew a lease so disconnected clients are eventually cleaned up. Each session serializes a small bounded queue of phrase/settings operations. Authentication binds session ownership to the requesting account.
+
+Queue generations and engine lifetime IDs guard every asynchronous synthesis result. Resetting the queue aborts requests and prevents old completions, counters, layout callbacks, or settings responses from affecting a replacement task or document. Cancellation does not mark the shared sync server unavailable.
 
 PDF phrases can be subdivided by layout block for speech. `ttsPhraseTimings` preserves the relationship between concatenated audio and visual layout blocks, and `wordBoundaries` drives word highlighting. An audio-cache entry is valid only when voice, speed, normalized text, and required phrase timing metadata still match.
 

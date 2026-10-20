@@ -1,4 +1,4 @@
-const APP_VERSION = "0.46.0+0";
+const APP_VERSION = "0.47.0+0";
 const IDB_VERSION = 1;
 const cacheName = `PocketReader-v${APP_VERSION}`;
 const runtimeCache = `PocketReader-runtime-v${APP_VERSION}`;
@@ -43,6 +43,7 @@ const staticFiles = [
     "/assets/icons/mask-512.png",
     "/assets/icons/mask.svg",
     "/assets/images/default-user.png",
+    "/assets/tts-voices.json",
     "/assets/rewards/trees/catalog.json",
     "/assets/rewards/trees/minute-sprout.svg",
     "/assets/rewards/trees/reading-sapling.svg",
@@ -124,6 +125,8 @@ const staticFiles = [
     "/src/modules/tts/piper-client.js",
     "/src/modules/tts/piper.worker.js",
     "/src/modules/tts/ttsBackendPreference.js",
+    "/src/modules/tts/serverTtsClient.js",
+    "/src/modules/tts/readingSpeed.js",
     "/src/modules/tts/synthesisQueue.js",
     "/src/modules/tts/ttsEngine.js",
     "/src/modules/tts/wordHighlighter.js",

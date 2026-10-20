@@ -262,6 +262,7 @@ export class ServerSync {
             this._markServerAvailability(true);
             return response;
         } catch (error) {
+            if (error?.name === "AbortError") throw error;
             this._markServerAvailability(false);
             const unavailableError = this._createServerUnavailableError(error?.message || "Server is unavailable");
             this._logServerError("", unavailableError);

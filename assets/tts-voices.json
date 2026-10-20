@@ -1,0 +1,182 @@
+{
+    "revision": "5041a7a49ae5b3a0f30e6837769eb03fdbb231bd",
+    "repository": "rhasspy/piper-voices",
+    "voices": {
+        "en_US-lessac-medium": {
+            "name": "lessac",
+            "quality": "medium",
+            "language": {
+                "code": "en_US",
+                "family": "en",
+                "region": "US",
+                "name_native": "English",
+                "name_english": "English",
+                "country_english": "United States"
+            },
+            "files": {
+                "en/en_US/lessac/medium/en_US-lessac-medium.onnx": {
+                    "size_bytes": 63201294,
+                    "md5_digest": "2fc642b535197b6305c7c8f92dc8b24f"
+                },
+                "en/en_US/lessac/medium/en_US-lessac-medium.onnx.json": {
+                    "size_bytes": 4885,
+                    "md5_digest": "c1f2b7bddefe113f3255ff9ef234cfd3"
+                }
+            }
+        },
+        "pt_BR-faber-medium": {
+            "name": "faber",
+            "quality": "medium",
+            "language": {
+                "code": "pt_BR",
+                "family": "pt",
+                "region": "BR",
+                "name_native": "Português",
+                "name_english": "Portuguese",
+                "country_english": "Brazil"
+            },
+            "files": {
+                "pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx": {
+                    "size_bytes": 63201294,
+                    "md5_digest": "e0724a2f07965f6523d2a1e96b488a4c"
+                },
+                "pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx.json": {
+                    "size_bytes": 4855,
+                    "md5_digest": "a1258e1e113c47d9a1486a9bef1daab4"
+                }
+            }
+        },
+        "en_GB-cori-medium": {
+            "name": "cori",
+            "quality": "medium",
+            "language": {
+                "code": "en_GB",
+                "family": "en",
+                "region": "GB",
+                "name_native": "English",
+                "name_english": "English",
+                "country_english": "Great Britain"
+            },
+            "files": {
+                "en/en_GB/cori/medium/en_GB-cori-medium.onnx": {
+                    "size_bytes": 63531379,
+                    "md5_digest": "f143307611eccea9d976235d0895f57c"
+                },
+                "en/en_GB/cori/medium/en_GB-cori-medium.onnx.json": {
+                    "size_bytes": 4966,
+                    "md5_digest": "12b1dc45d8919f3475cf296d5f16a4c6"
+                }
+            }
+        },
+        "de_DE-thorsten-medium": {
+            "name": "thorsten",
+            "quality": "medium",
+            "language": {
+                "code": "de_DE",
+                "family": "de",
+                "region": "DE",
+                "name_native": "Deutsch",
+                "name_english": "German",
+                "country_english": "Germany"
+            },
+            "files": {
+                "de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx": {
+                    "size_bytes": 63201294,
+                    "md5_digest": "a129b00fb3078df43c96bab6c94535c0"
+                },
+                "de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx.json": {
+                    "size_bytes": 4819,
+                    "md5_digest": "843a7bd7272724f750534dd5a26d1aad"
+                }
+            }
+        },
+        "es_ES-davefx-medium": {
+            "name": "davefx",
+            "quality": "medium",
+            "language": {
+                "code": "es_ES",
+                "family": "es",
+                "region": "ES",
+                "name_native": "Español",
+                "name_english": "Spanish",
+                "country_english": "Spain"
+            },
+            "files": {
+                "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx": {
+                    "size_bytes": 63201294,
+                    "md5_digest": "dc515cd4ecc5f6f72fe14a941188fc9c"
+                },
+                "es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json": {
+                    "size_bytes": 4817,
+                    "md5_digest": "dd157b5eaf6930bf949cf416d9a9307a"
+                }
+            }
+        },
+        "fr_FR-siwis-medium": {
+            "name": "siwis",
+            "quality": "medium",
+            "language": {
+                "code": "fr_FR",
+                "family": "fr",
+                "region": "FR",
+                "name_native": "Français",
+                "name_english": "French",
+                "country_english": "France"
+            },
+            "files": {
+                "fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx": {
+                    "size_bytes": 63201294,
+                    "md5_digest": "20e876e8c839e9b11a26085858f2300c"
+                },
+                "fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx.json": {
+                    "size_bytes": 4875,
+                    "md5_digest": "a407e7e6901feb79c2ea2a5466076cce"
+                }
+            }
+        },
+        "zh_CN-huayan-medium": {
+            "name": "huayan",
+            "quality": "medium",
+            "language": {
+                "code": "zh_CN",
+                "family": "zh",
+                "region": "CN",
+                "name_native": "简体中文",
+                "name_english": "Chinese",
+                "country_english": "China"
+            },
+            "files": {
+                "zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx": {
+                    "size_bytes": 63201294,
+                    "md5_digest": "40cdb7930ff91b81574d5f0489e076ea"
+                },
+                "zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json": {
+                    "size_bytes": 4822,
+                    "md5_digest": "1fda3ec1d0d3a5a74064397ea8fe0af0"
+                }
+            }
+        },
+        "en_US-lessac-high": {
+            "name": "lessac",
+            "quality": "high",
+            "language": {
+                "code": "en_US",
+                "family": "en",
+                "region": "US",
+                "name_native": "English",
+                "name_english": "English",
+                "country_english": "United States"
+            },
+            "files": {
+                "en/en_US/lessac/high/en_US-lessac-high.onnx": {
+                    "size_bytes": 113895201,
+                    "md5_digest": "99d1f6181a7f5ccbe3f117ba8ce63c93"
+                },
+                "en/en_US/lessac/high/en_US-lessac-high.onnx.json": {
+                    "size_bytes": 4883,
+                    "md5_digest": "02e8e364c86b5d3b75e81704b0369856"
+                }
+            }
+        }
+    }
+}

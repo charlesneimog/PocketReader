@@ -479,6 +479,19 @@
                 <div id="settings-panel-audio" class="settings-panel" role="tabpanel"
                     aria-labelledby="settings-tab-audio" tabindex="0">
                     <div>
+                        <label class="flex items-center justify-between gap-3 text-sm font-medium text-gray-600 dark:text-gray-400">
+                            <span>Use server speech when available</span>
+                            <input id="server-tts-enabled" type="checkbox" role="switch"
+                                aria-describedby="server-tts-description tts-provider-status"
+                                class="h-5 w-5 accent-blue-500" />
+                        </label>
+                        <p id="server-tts-description" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                            Your server generates speech with the selected voice. This device handles speech when the server is unavailable.
+                        </p>
+                        <p id="tts-provider-status" role="status" aria-live="polite"
+                            class="mt-2 text-xs text-gray-500 dark:text-gray-400">Speech: this device</p>
+                    </div>
+                    <div>
                         <label class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
                             Change voice language
                         </label>
@@ -1342,6 +1355,7 @@
                     } catch (err) {
                         console.error("[Auth] Failed to validate saved token", err);
                     }
+                    await app.ttsEngine?.deactivate?.();
                     app.serverSync?.clearAuthToken?.();
                     authStatus.textContent = "Not authenticated";
                     if (authButton) {
@@ -1377,6 +1391,7 @@
                     googleDriveStatus.textContent = "Connecting…";
                     try {
                         await app.serverSync.connectGoogleDrive();
+                        await app.ttsEngine?.deactivate?.();
                         app.serverSync.clearAuthToken();
                         app.serverSync.setBackend("google-drive");
                         await refreshAuthState();
@@ -1526,6 +1541,7 @@
                 });
 
                 logoutBtn.addEventListener("click", async () => {
+                    await app.ttsEngine?.deactivate?.();
                     app.serverSync?.clearAuthToken?.();
                     await refreshAuthState();
                     showAuthOverlay({ force: true });

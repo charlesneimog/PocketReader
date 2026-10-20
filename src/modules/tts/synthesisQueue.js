@@ -7,6 +7,7 @@ export class TTSQueueManager {
         this.queue = [];
         this.active = 0;
         this.inFlight = new Set();
+        this.generation = 0;
     }
 
     add(idx, priority = false) {
@@ -21,6 +22,7 @@ export class TTSQueueManager {
         if (!sentence.layoutProcessed) {
             if (!sentence.layoutProcessingPromise) {
                 if (state.currentDocumentType !== "pdf" || !this.app.getPdfHeaderFooterDetector) return;
+                const generation = this.generation;
                 sentence.layoutProcessingPromise = this.app.getPdfHeaderFooterDetector()
                     .ensureReadabilityForPage(sentence.pageNumber)
                     .catch((err) => {
@@ -28,7 +30,7 @@ export class TTSQueueManager {
                     })
                     .finally(() => {
                         sentence.layoutProcessingPromise = null;
-                        this.add(idx, priority);
+                        if (generation === this.generation && state.sentences[idx] === sentence) this.add(idx, priority);
                     });
             }
             return;
@@ -64,6 +66,7 @@ export class TTSQueueManager {
     async startTask(idx) {
         const { state } = this.app;
         const sentence = state.sentences[idx];
+        const generation = this.generation;
         if (!sentence) return;
 
         if (!sentence.layoutProcessed) {
@@ -81,6 +84,7 @@ export class TTSQueueManager {
         this.inFlight.add(idx);
         try {
             await this.app.ttsEngine.synthesizeSequential(idx);
+            if (generation !== this.generation || state.sentences[idx] !== sentence || !state.generationEnabled) return;
             // if sentence is same as current sentence, then begin playback immediately
             if (idx === state.currentSentenceIndex && !state.isPlaying) {
                 this.app.ui.updatePlayButton(state.playerState.DONE);
@@ -89,19 +93,28 @@ export class TTSQueueManager {
             this.app.eventBus.emit(EVENTS.TTS_SYNTHESIS_COMPLETE, { index: idx });
 
         } catch (e) {
+            if (generation !== this.generation || e.name === "AbortError") return;
             console.warn("Synthesis failure:", e);
             this.app.eventBus.emit(EVENTS.TTS_SYNTHESIS_ERROR, { index: idx, error: e });
         } finally {
-            this.active--;
-            this.inFlight.delete(idx);
-            this.run();
-            if (this.active === 0 && this.queue.length === 0 && !state.isPlaying) {
-                this.app.ui.updatePlayButton(state.playerState.DONE);
+            if (generation === this.generation) {
+                this.active--;
+                this.inFlight.delete(idx);
+                this.run();
+                if (this.active === 0 && this.queue.length === 0 && !state.isPlaying) {
+                    this.app.ui.updatePlayButton(state.playerState.DONE);
+                }
             }
         }
     }
 
     reset() {
+        this.generation++;
+        this.app.ttsEngine?.cancelSynthesis?.();
+        for (const sentence of this.app.state.sentences) {
+            sentence.audioInProgress = false;
+            sentence.prefetchQueued = false;
+        }
         this.queue = [];
         this.active = 0;
         this.inFlight.clear();

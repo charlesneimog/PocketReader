@@ -89,6 +89,8 @@ export class PDFTTSApp {
         this.audioManager = new AudioManager(this);
         this.ttsQueue = new TTSQueueManager(this);
         this.wordHighlighter = new WordHighlighter(this);
+        // pagehide is best effort; the server lease also covers killed phones.
+        window.addEventListener("pagehide", () => { void this.ttsEngine.deactivate(); });
 
         this._setupAutoTranslate();
         this._setupReadTranslation();
@@ -215,6 +217,8 @@ export class PDFTTSApp {
         );
 
         const raw = localStorage.getItem("config.autoTranslate");
+        this.state.serverTtsEnabled = localStorage.getItem("config.serverTtsEnabled") === "1";
+        this.controlsManager?.reflectServerTtsEnabled?.(this.state.serverTtsEnabled);
         const enabled = raw === "1" || raw === "true";
         this.state.autoTranslateEnabled = enabled;
         this.controlsManager?.reflectAutoTranslateToggle?.(enabled);
@@ -1109,6 +1113,8 @@ export class PDFTTSApp {
 
         const setup = await this._promptTranslationSetupBeforeOpen(file, "pdf", options);
         if (!setup.proceed) return null;
+        if (file instanceof File) await this.ttsEngine.beginDocument();
+        const speechLifetime = this.ttsEngine._lifetime;
         if (setup.shouldPlay) {
             this.startBookOpenPlaybackTimer({
                 bookName: file?.name || "",
@@ -1133,13 +1139,21 @@ export class PDFTTSApp {
                   })
                 : Promise.resolve(null);
 
-        const result = await this.pdfLoader.loadPDF(file, options);
+        let result;
+        try {
+            result = await this.pdfLoader.loadPDF(file, options);
+        } catch (error) {
+            if (speechLifetime === this.ttsEngine._lifetime) await this.ttsEngine.deactivate();
+            throw error;
+        }
+        if (speechLifetime !== this.ttsEngine._lifetime) return null;
         this.ui?.setBookLoadingPageReady?.();
         this._setReaderScrollbarsHidden(this.state.currentDocumentType === "pdf" && !!this.state.pdf);
         if (setup.setup?.docKey) {
             await this._persistTranslationSettingsForDocument(setup.setup.docKey, "pdf", setup.setup);
         }
         await voiceWarmupPromise;
+        if (speechLifetime !== this.ttsEngine._lifetime) return null;
         // Re-check after loading because server/local resume data may have
         // selected a different voice while the early warm-up was running.
         try {
@@ -1159,6 +1173,8 @@ export class PDFTTSApp {
     async loadEPUB(file = null, options = {}) {
         const setup = await this._promptTranslationSetupBeforeOpen(file, "epub", options);
         if (!setup.proceed) return null;
+        await this.ttsEngine.beginDocument();
+        const speechLifetime = this.ttsEngine._lifetime;
         if (setup.shouldPlay) {
             this.startBookOpenPlaybackTimer({
                 bookName: file?.name || "",
@@ -1173,7 +1189,14 @@ export class PDFTTSApp {
             const overlay = document.getElementById("no-pdf-overlay");
             if (overlay) overlay.style.display = "none";
         }
-        const result = await this.epubLoader.loadEPUB(file, options);
+        let result;
+        try {
+            result = await this.epubLoader.loadEPUB(file, options);
+        } catch (error) {
+            if (speechLifetime === this.ttsEngine._lifetime) await this.ttsEngine.deactivate();
+            throw error;
+        }
+        if (speechLifetime !== this.ttsEngine._lifetime) return null;
         this.ui?.setBookLoadingPageReady?.();
         this._setReaderScrollbarsHidden(this.state.currentDocumentType === "epub" && !!this.state.epub);
         if (setup.setup?.docKey) {
@@ -1271,6 +1294,10 @@ export class PDFTTSApp {
      */
     async closeCurrentDocument() {
         const { state } = this;
+        state.generationEnabled = false;
+        this.ttsQueue?.reset();
+        // Invalidate synthesis immediately, before persistence or fades await.
+        const speechCleanup = this.ttsEngine.deactivate();
         this._setReaderScrollbarsHidden(false);
 
         try {
@@ -1299,6 +1326,7 @@ export class PDFTTSApp {
         try {
             // Reset TTS queue
             this.ttsQueue?.reset?.();
+            await speechCleanup;
         } catch (err) {
             console.debug("closeCurrentDocument: ttsQueue.reset failed", err);
         }

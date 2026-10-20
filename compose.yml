@@ -1,6 +1,6 @@
 services:
     localreader-server:
-        mem_limit: 256m
+        mem_limit: ${SERVER_MEMORY_LIMIT:-1g}
         build: .
         ports:
             - "8997:8000"
@@ -9,6 +9,9 @@ services:
         env_file:
             - .env
         environment:
+            TTS_ENABLED: "${TTS_ENABLED:-true}"
+            TTS_MAX_SESSIONS: "${TTS_MAX_SESSIONS:-2}"
+            TTS_SESSION_LEASE_SECONDS: "${TTS_SESSION_LEASE_SECONDS:-180}"
             READING_DIGEST_ENABLED: "${READING_DIGEST_ENABLED:-true}"
             READING_DIGEST_POLL_SECONDS: "${READING_DIGEST_POLL_SECONDS:-900}"
             READING_DIGEST_WEEKLY_HOUR: "${READING_DIGEST_WEEKLY_HOUR:-18}"

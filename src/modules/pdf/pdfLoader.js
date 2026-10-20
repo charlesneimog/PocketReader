@@ -443,6 +443,7 @@ export class PDFLoader {
         } catch (e) {
             console.error(e);
             app.ui.showInfo("Error: " + e.message);
+            throw e;
         } finally {
             document.body.style.cursor = "default";
             this.app.ui.updatePlayButton(state.playerState.DONE);

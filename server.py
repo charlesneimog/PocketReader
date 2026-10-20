@@ -7,6 +7,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+import signal
 import smtplib
 import logging
 import mimetypes
@@ -22,6 +23,7 @@ import unicodedata
 import app
 from reading_digest_service import ReadingDigestService
 from reading_reminder_service import ReadingReminderService
+from tts_service import TTSManager, TTSError
 
 HOST = "0.0.0.0"
 PORT = 8000
@@ -385,6 +387,7 @@ def _smtp_is_configured() -> bool:
 
 
 class APIHandler(BaseHTTPRequestHandler):
+    tts_manager = None
     # Read allowed origins from environment variable, fallback to defaults
     ALLOWED_ORIGINS = [
         o.strip()
@@ -409,9 +412,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 continue
             if allowed_origin == "*":
                 return True
-            # Historically we used prefix-matching (startswith). Keep that behavior
-            # for compatibility with older deployments.
-            if origin.startswith(allowed_origin):
+            if origin == allowed_origin:
                 return True
         return False
 
@@ -496,7 +497,6 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "credentialless")
         self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
-        self.send_header("Access-Control-Allow-Origin", "*")
 
     def _should_apply_coi_headers(self, path: str) -> bool:
         """Decide whether to apply Cross-Origin Isolation headers."""
@@ -533,18 +533,89 @@ class APIHandler(BaseHTTPRequestHandler):
     
     def _send_json(self, status_code, data):
         """Send JSON response."""
+        body = json.dumps(data).encode()
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self._set_cors_headers()
         # Apply COI headers for API responses to support WASM threading.
         # This is safe to send broadly and keeps behavior consistent.
         self._set_cross_origin_isolation_headers()
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+        self.wfile.write(body)
     
     def _send_error(self, status_code, message):
         """Send error response."""
         self._send_json(status_code, {"error": message})
+
+    def _read_tts_json(self):
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            raise TTSError(400, "Invalid Content-Length") from None
+        if not 0 <= size <= 65536:
+            raise TTSError(413, "Speech request exceeds 64 KiB")
+        try:
+            data = json.loads(self.rfile.read(size)) if size else {}
+        except (ValueError, UnicodeDecodeError):
+            raise TTSError(400, "Invalid JSON") from None
+        if not isinstance(data, dict):
+            raise TTSError(400, "Speech request must be a JSON object")
+        return data
+
+    def _handle_tts(self, method, path):
+        if not path.startswith("/api/tts/"):
+            return False
+        owner = self._require_auth()
+        if not owner:
+            return True
+        manager = self.tts_manager
+        try:
+            if method == "GET" and path == "/api/tts/capabilities":
+                self._send_json(200, manager.capabilities() if manager else {"enabled": False, "voices": []})
+                return True
+            if manager is None:
+                raise TTSError(503, "Server speech is unavailable")
+            if method == "POST" and path == "/api/tts/sessions":
+                data = self._read_tts_json()
+                result = manager.create(owner, data.get("id"), data.get("voice"),
+                                        data.get("lengthScale"), data.get("modelRevision"))
+                self._send_json(201, result)
+                return True
+            match = re.fullmatch(r"/api/tts/sessions/([^/]+)(?:/(phrases|heartbeat))?", path)
+            if not match:
+                raise TTSError(404, "Not found")
+            session_id, action = match.groups()
+            if method == "DELETE" and action is None:
+                manager.close(owner, session_id)
+                self._send_json(200, {"success": True})
+            elif method == "PUT" and action is None:
+                data = self._read_tts_json()
+                self._send_json(200, manager.configure(owner, session_id, data.get("voice"), data.get("lengthScale")))
+            elif method == "POST" and action == "heartbeat":
+                self._send_json(200, manager.heartbeat(owner, session_id))
+            elif method == "POST" and action == "phrases":
+                data = self._read_tts_json()
+                audio = manager.synthesize(owner, session_id, data.get("text"), data.get("voice"), data.get("lengthScale"))
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Length", str(len(audio)))
+                self.send_header("Cache-Control", "no-store")
+                self._set_cors_headers()
+                self._set_cross_origin_isolation_headers()
+                self.end_headers()
+                self.wfile.write(audio)
+            else:
+                raise TTSError(404, "Not found")
+        except TTSError as error:
+            self._send_error(error.status, str(error))
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Closing a book may abort the browser's in-flight response.
+        except Exception:
+            logger.exception("Server speech request failed")
+            self._send_error(503, "Server speech failed")
+        return True
     
     def do_OPTIONS(self):
         """Handle preflight requests."""
@@ -560,6 +631,9 @@ class APIHandler(BaseHTTPRequestHandler):
         """Handle GET requests."""
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if self._handle_tts("GET", path):
+            return
 
         logger.debug("GET %s ip=%s", path, self.client_address[0])
 
@@ -806,6 +880,9 @@ class APIHandler(BaseHTTPRequestHandler):
         """Handle POST requests."""
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if self._handle_tts("POST", path):
+            return
 
         # POST /api/auth/signup
         if path == "/api/auth/signup":
@@ -1074,6 +1151,9 @@ class APIHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
+        if self._handle_tts("DELETE", path):
+            return
+
         user_email = self._require_auth()
         if not user_email:
             return
@@ -1097,6 +1177,9 @@ class APIHandler(BaseHTTPRequestHandler):
         """Handle PUT requests."""
         parsed = urlparse(self.path)
         path = parsed.path
+
+        if self._handle_tts("PUT", path):
+            return
 
         user_email = self._require_auth()
         if not user_email:
@@ -1289,6 +1372,9 @@ def main():
     # Initialize database
     app.init_db()
     logger.info("Database initialized at %s", app.DB_PATH)
+    APIHandler.tts_manager = TTSManager.from_environment()
+    APIHandler.tts_manager.start()
+    logger.info("Server speech enabled: %s", APIHandler.tts_manager.enabled)
     
     # Start server
     server = ThreadingHTTPServer((HOST, PORT), APIHandler)
@@ -1340,12 +1426,19 @@ def main():
         else:
             logger.warning("Reading email digests enabled but SMTP is not configured")
     
+    def stop_on_signal(signum, frame):
+        raise KeyboardInterrupt
+
+    previous_sigterm = signal.signal(signal.SIGTERM, stop_on_signal)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         logger.info("Shutting down server...")
         server.shutdown()
     finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        APIHandler.tts_manager.shutdown()
+        server.server_close()
         if digest_service:
             digest_service.stop()
         if reminder_service:

@@ -269,6 +269,7 @@ export class EPUBLoader {
             console.error("EPUB load error", error);
             this.app.ui.showInfo(`Error loading EPUB: ${error.message}`);
             this.reset();
+            throw error;
         } finally {
             this.app.ui.updatePlayButton(state.playerState.DONE);
         }
