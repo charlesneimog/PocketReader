@@ -60,6 +60,20 @@ test("a phrase cannot spill into a different document while its tree starts", as
     assert.deepEqual(recorded, []);
 });
 
+test("a document switch during automatic startup retains the new document's first phrase", async () => {
+    const { controller, recorded } = readingPhraseController();
+    let checks = 0;
+    controller._ensureAutomaticTree = async () => ({
+        id: "tree-1", state: "active", document: { id: ++checks === 1 ? "previous-book" : "book-1" },
+    });
+    await controller._recordReadingPhrase({ index: 0 });
+    assert.equal(checks, 2);
+    assert.deepEqual(recorded, [{
+        phrase: { documentId: "book-1", location: 0, text: "First read phrase." },
+        sessionId: "tree-1",
+    }]);
+});
+
 test("continuous TTS resumes a stale automatic reward pause", async () => {
     let resumed = false;
     const controller = Object.create(RewardsController.prototype);

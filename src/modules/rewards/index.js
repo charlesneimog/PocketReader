@@ -238,7 +238,14 @@ export class RewardsController {
         if (current?.automatic && current.state === "active" && current.document?.id === descriptor.id) {
             return this.sessions.recordReadingPhrase(phrase, current.id);
         }
-        return this._ensureAutomaticTree().then((session) => {
+        return this._ensureAutomaticTree().then(async (session) => {
+            // A document switch can share an automatic-start promise that was
+            // already creating the previous document's tree. Reconcile again
+            // once that work finishes, retaining the new document's first phrase.
+            if (session && session.document?.id !== descriptor.id &&
+                this.adapter.getDocumentDescriptor()?.id === descriptor.id) {
+                session = await this._ensureAutomaticTree();
+            }
             if (!session || session.state !== "active" || session.document?.id !== descriptor.id) return null;
             return this.sessions.recordReadingPhrase(phrase, session.id);
         });

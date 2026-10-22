@@ -1,4 +1,5 @@
 import { GardenRenderer } from "../rewards/gardenRenderer.js";
+import { copyReadingText, readingTextFromPhrases } from "./readingTextClipboard.js";
 import { deterministicAvailableCell, gardenSquareSideWithFreeSpots } from "../rewards/gardenManager.js";
 import {
     isTimestampInLocalPeriod,
@@ -142,10 +143,7 @@ export function readingTextForPlant(plant, sessions) {
     const phrases = Array.isArray(plant?.readingPhrases)
         ? plant.readingPhrases
         : session?.readingPhrases;
-    return (Array.isArray(phrases) ? phrases : [])
-        .map((phrase) => typeof phrase?.text === "string" ? phrase.text : "")
-        .filter((text) => text.trim())
-        .join("\n\n");
+    return readingTextFromPhrases(phrases);
 }
 
 export class GardenDialog {
@@ -315,16 +313,7 @@ export class GardenDialog {
 
         const button = this.dialog.querySelector("[data-copy]");
         button.disabled = true;
-        let copied = false;
-        try {
-            if (globalThis.navigator?.clipboard?.writeText) {
-                await globalThis.navigator.clipboard.writeText(text);
-                copied = true;
-            }
-        } catch (_) {
-            // Try the selection fallback when clipboard access is unavailable.
-        }
-        if (!copied) copied = this._copyTextUsingSelection(text);
+        const copied = await copyReadingText(text, this.dialog);
 
         if (this.selectedPlantId === plantId) {
             button.disabled = false;
@@ -335,25 +324,6 @@ export class GardenDialog {
             status.classList.remove("hidden");
         }
         return copied;
-    }
-
-    _copyTextUsingSelection(text) {
-        const previousFocus = document.activeElement;
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        try {
-            this.dialog.appendChild(textarea);
-            textarea.focus();
-            textarea.select();
-            return Boolean(document.execCommand?.("copy"));
-        } catch (_) {
-            return false;
-        } finally {
-            textarea.remove();
-            previousFocus?.focus?.({ preventScroll: true });
-        }
     }
 
     async _removeSelectedTree() {

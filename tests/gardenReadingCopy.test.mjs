@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { GardenDialog, readingTextForPlant } from "../src/modules/ui/gardenDialog.js";
+import { ReflectionDialog } from "../src/modules/ui/reflectionDialog.js";
 
 function stubElement() {
     const classes = new Set(["hidden"]);
@@ -105,7 +106,6 @@ test("copying sends all recorded phrases to the clipboard and reports success", 
     const { dialog, elements } = createDialog();
     let copiedText;
     mockGlobal(t, "navigator", { clipboard: { writeText: async (text) => { copiedText = text; } } });
-    dialog._copyTextUsingSelection = () => assert.fail("Clipboard succeeded; no fallback is needed");
     assert.equal(await dialog._copySelectedTreeText(), true);
     assert.equal(copiedText, "The first phrase.\n\nThe next phrase.");
     assert.equal(elements["[data-copy-status]"].textContent, "Reading text copied.");
@@ -148,7 +148,11 @@ test("clipboard rejection falls back to a selection inside the modal and cleans 
 test("failed copying reports failure and permits trying again", async (t) => {
     const { dialog, elements } = createDialog();
     mockGlobal(t, "navigator", {});
-    dialog._copyTextUsingSelection = () => false;
+    mockGlobal(t, "document", {
+        createElement: () => ({ style: {}, focus() {}, select() {}, remove() {} }),
+        execCommand: () => false,
+    });
+    dialog.dialog.appendChild = () => {};
     assert.equal(await dialog._copySelectedTreeText(), false);
     assert.equal(elements["[data-copy-status]"].textContent, "Could not copy reading text. Please try again.");
     assert.equal(elements["[data-copy]"].disabled, false);
@@ -166,4 +170,29 @@ test("finishing a copy does not overwrite another selected tree's details", asyn
     finishCopy();
     assert.equal(await pending, true);
     assert.equal(elements["[data-copy-status]"].textContent, "Another tree's status");
+});
+
+test("a newly earned tree copies its completed interval before saving the note", async (t) => {
+    const { dialog: garden, elements } = createDialog();
+    const dialog = Object.create(ReflectionDialog.prototype);
+    dialog.dialog = garden.dialog;
+    dialog.session = { readingPhrases: [{ text: "A completed interval." }, { text: "Its final phrase." }] };
+    let copiedText;
+    mockGlobal(t, "navigator", { clipboard: { writeText: async (text) => { copiedText = text; } } });
+    dialog._updateCopyButton();
+    assert.equal(elements["[data-copy]"].disabled, false);
+    assert.equal(await dialog._copyReadingText(), true);
+    assert.equal(copiedText, "A completed interval.\n\nIts final phrase.");
+    assert.equal(elements["[data-copy-status]"].textContent, "Reading text copied.");
+    assert.equal(elements["[data-copy]"].disabled, false);
+});
+
+test("pending historic notes explain when reading text was not recorded", () => {
+    const { dialog: garden, elements } = createDialog();
+    const dialog = Object.create(ReflectionDialog.prototype);
+    dialog.dialog = garden.dialog;
+    dialog.session = { id: "old-session" };
+    dialog._updateCopyButton();
+    assert.equal(elements["[data-copy]"].disabled, true);
+    assert.equal(elements["[data-copy-label]"].textContent, "No recorded text");
 });

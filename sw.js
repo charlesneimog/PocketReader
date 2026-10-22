@@ -136,6 +136,7 @@ const staticFiles = [
     "/src/modules/ui/uiService.js",
     "/src/modules/ui/gardenDialog.js",
     "/src/modules/ui/reflectionDialog.js",
+    "/src/modules/ui/readingTextClipboard.js",
     "/src/modules/ui/rewardsPanel.js",
     "/src/modules/ui/sessionProgressWidget.js",
     "/src/modules/ui/sessionSetupDialog.js",
