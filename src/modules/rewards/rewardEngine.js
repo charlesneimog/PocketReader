@@ -186,6 +186,12 @@ export class RewardEngine {
             session.updatedAt = timestamp;
             session.goalReachedAt ||= timestamp;
             const plant = state.plants.find((candidate) => candidate.id === session.plantId);
+            if (plant) {
+                plant.readingPhrases = Array.isArray(session.readingPhrases)
+                    ? session.readingPhrases.map((phrase) => ({ ...phrase }))
+                    : [];
+                plant.updatedAt = timestamp;
+            }
             if (session.automatic && plant) {
                 plant.growthProgress = 1;
                 plant.stage = "mature";

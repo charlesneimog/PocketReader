@@ -19,6 +19,7 @@ It runs in your browser and can be installed as a **Progressive Web App (PWA)** 
 - Optional **server TTS** using the same pinned Piper voice models, delivered as phrase MP3s.
 - **Offline-first:** works fully offline once models are loaded.  
 - **Word and sentence-level highlights** with persistent storage (IndexedDB).  
+- **Reading trees** save the phrases read during each interval. Use **Copy reading text** when a tree is planted or select it in the garden to copy the full passage.
 - **Document gallery** with progressive thumbnails and resume support.  
 - **EPUB** rendering via *Foliate-view* (annotations, CFIs).  
 - **PDF** rendering via *PDF.js* with sentence extraction and layout cleanup.  

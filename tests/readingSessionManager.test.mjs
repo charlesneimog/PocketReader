@@ -248,3 +248,122 @@ test("an active session imported by account sync reactivates the runtime tracker
     assert.equal(item.tracker.paused, false);
     assert.equal(item.lock.sessionId, session.id);
 });
+
+test("read phrases retain reading order and distinct locations while replay deduplicates", async () => {
+    const item = await fixture();
+    const session = await item.manager.ensureAutomatic();
+    assert.deepEqual(session.readingPhrases, []);
+
+    await item.manager.recordReadingPhrase({ documentId: "doc", location: 4, text: "  The first\n phrase.  " });
+    await item.manager.pause();
+    await item.manager.resume();
+    await item.manager.recordReadingPhrase({ documentId: "doc", location: 4, text: "The first phrase." });
+    await item.manager.recordReadingPhrase({ documentId: "doc", location: 2, text: "The first phrase." });
+    await item.manager.recordReadingPhrase({ documentId: "doc", location: 5, text: "The next phrase." });
+
+    assert.deepEqual(item.manager.getCurrentSession().readingPhrases, [
+        { documentId: "doc", location: 4, text: "The first phrase." },
+        { documentId: "doc", location: 2, text: "The first phrase." },
+        { documentId: "doc", location: 5, text: "The next phrase." },
+    ]);
+});
+
+test("each completed tree keeps exactly its own read phrases", async () => {
+    const item = await fixture();
+    const first = await item.manager.ensureAutomatic();
+    const firstPhrase = { documentId: "doc", location: 0, text: "The beginning of reading." };
+    const lastPhrase = { documentId: "doc", location: 1, text: "The last phrase of the first tree." };
+    await item.manager.recordReadingPhrase(firstPhrase);
+    await item.engine.recordActiveReading({ milliseconds: first.goalMs, sessionId: first.id, documentId: "doc" });
+
+    const completion = item.manager.complete();
+    const pendingPhrase = item.manager.recordReadingPhrase(lastPhrase);
+    const completed = await completion;
+    await pendingPhrase;
+    assert.deepEqual(completed.plant.readingPhrases, [firstPhrase, lastPhrase]);
+
+    const second = await item.manager.ensureAutomatic();
+    assert.deepEqual(second.readingPhrases, []);
+    const secondPhrase = { documentId: "doc", location: 2, text: "The first phrase of the second tree." };
+    await item.manager.recordReadingPhrase(secondPhrase);
+    await item.engine.recordActiveReading({ milliseconds: second.goalMs, sessionId: second.id, documentId: "doc" });
+    const nextCompleted = await item.manager.complete();
+
+    const state = item.storage.getSnapshot();
+    assert.deepEqual(state.plants.find((plant) => plant.id === first.plantId).readingPhrases, [firstPhrase, lastPhrase]);
+    assert.deepEqual(nextCompleted.plant.readingPhrases, [secondPhrase]);
+});
+
+test("a delayed phrase targets its captured completed tree after the next tree starts", async () => {
+    const item = await fixture();
+    const first = await item.manager.ensureAutomatic();
+    await item.engine.recordActiveReading({ milliseconds: first.goalMs, sessionId: first.id, documentId: "doc" });
+    await item.manager.complete();
+    const next = await item.manager.ensureAutomatic();
+    const phrase = { documentId: "doc", location: 7, text: "A phrase captured before completion." };
+
+    await item.manager.recordReadingPhrase(phrase, first.id);
+
+    const state = item.storage.getSnapshot();
+    assert.equal(state.currentSession.id, next.id);
+    assert.deepEqual(state.currentSession.readingPhrases, []);
+    assert.deepEqual(state.sessions.find((session) => session.id === first.id).readingPhrases, [phrase]);
+    assert.deepEqual(state.plants.find((plant) => plant.id === first.plantId).readingPhrases, [phrase]);
+});
+
+test("focus resets and document switches preserve phrases already read", async () => {
+    const item = await fixture();
+    const session = await item.manager.ensureAutomatic();
+    const firstPhrase = { documentId: "doc", location: 0, text: "A phrase from the first document." };
+    await item.manager.recordReadingPhrase(firstPhrase);
+    item.tracker.onDelta(1000);
+    await item.manager.deltaQueue;
+    await item.manager.resetContinuousProgress({ reason: "tab-hidden" });
+    assert.deepEqual(item.manager.getCurrentSession().readingPhrases, [firstPhrase]);
+
+    item.manager.getDocument = () => ({ id: "epub-doc", type: "epub", title: "Another book" });
+    const switched = await item.manager.ensureAutomatic();
+    const secondPhrase = { documentId: "epub-doc", location: "epubcfi(/6/2!/4/2)", text: "A phrase from the next document." };
+    await item.manager.recordReadingPhrase(secondPhrase);
+
+    assert.equal(switched.id, session.id);
+    assert.deepEqual(item.manager.getCurrentSession().readingPhrases, [firstPhrase, secondPhrase]);
+});
+
+test("completed tree text survives local reload and account sync without session history", async () => {
+    const item = await fixture();
+    const session = await item.manager.ensureAutomatic();
+    const phrase = { documentId: "doc", location: 0, text: "The complete text remains on the tree." };
+    await item.manager.recordReadingPhrase(phrase);
+    await item.engine.recordActiveReading({ milliseconds: session.goalMs, sessionId: session.id, documentId: "doc" });
+    await item.manager.complete();
+
+    const reloaded = await fixture(item.backing);
+    const reloadedPlant = reloaded.storage.getSnapshot().plants.find((plant) => plant.id === session.plantId);
+    assert.deepEqual(reloadedPlant.readingPhrases, [phrase]);
+
+    const accountSnapshot = item.storage.getSnapshot();
+    accountSnapshot.currentSession = null;
+    accountSnapshot.sessions = [];
+    const otherDevice = await fixture();
+    const synchronized = await otherDevice.storage.merge(accountSnapshot);
+    assert.deepEqual(synchronized.sessions, []);
+    assert.deepEqual(synchronized.plants.find((plant) => plant.id === session.plantId).readingPhrases, [phrase]);
+});
+
+test("empty phrases and phrases for abandoned or removed trees are ignored", async () => {
+    const item = await fixture();
+    const session = await item.manager.ensureAutomatic();
+    const phrase = { documentId: "doc", location: 0, text: "A phrase." };
+    assert.equal(await item.manager.recordReadingPhrase({ ...phrase, text: " \n " }), null);
+    assert.equal(await item.manager.recordReadingPhrase({ ...phrase, location: -1 }), null);
+    await item.manager.abandon();
+    assert.equal(await item.manager.recordReadingPhrase(phrase, session.id), null);
+
+    const next = await item.manager.ensureAutomatic();
+    await item.storage.transaction((state) => {
+        state.plants.find((plant) => plant.id === next.plantId).deletedAt = Date.now();
+    });
+    assert.equal(await item.manager.recordReadingPhrase(phrase, next.id), null);
+    assert.deepEqual(item.manager.getCurrentSession().readingPhrases, []);
+});

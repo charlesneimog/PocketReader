@@ -133,6 +133,7 @@ export class ReadingSessionManager {
                     state: SESSION_STATES.ACTIVE,
                     goalMs: Math.round(goal * 60000),
                     activeReadingMs: 0,
+                    readingPhrases: [],
                     pointsEarned: 0,
                     document,
                     plantId: plant.id,
@@ -307,6 +308,41 @@ export class ReadingSessionManager {
 
     getCurrentSession() {
         return this.storage.getSnapshot().currentSession;
+    }
+
+    async recordReadingPhrase({ documentId, location, text } = {}, sessionId = this.getCurrentSession()?.id) {
+        const normalizedText = typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
+        const normalizedDocumentId = typeof documentId === "string" ? documentId.trim() : "";
+        const validLocation = typeof location === "string"
+            ? !!location.trim()
+            : Number.isFinite(location) && location >= 0;
+        if (!sessionId || !normalizedDocumentId || !normalizedText || !validLocation) return null;
+        const phrase = { documentId: normalizedDocumentId, location, text: normalizedText };
+        const timestamp = this.now();
+
+        // Queue the captured phrase immediately against its original session.
+        // Resolving the current session after an await could put the last phrase
+        // of one tree into the following tree while completion is being saved.
+        return this.storage.transaction((state) => {
+            const session = state.sessions.find((candidate) => candidate.id === sessionId);
+            if (!session || session.state === SESSION_STATES.ABANDONED) return null;
+            const plant = state.plants.find((candidate) => candidate.id === session.plantId);
+            if (!plant || plant.deletedAt) return null;
+            const phrases = Array.isArray(session.readingPhrases) ? session.readingPhrases : [];
+            if (phrases.some((entry) => entry.documentId === phrase.documentId &&
+                entry.location === phrase.location && entry.text === phrase.text)) return null;
+            phrases.push(phrase);
+            session.readingPhrases = phrases;
+            session.updatedAt = timestamp;
+            if (state.currentSession?.id === sessionId) state.currentSession = { ...session };
+            // A phrase that began before completion may finish being persisted
+            // after the next session has started. Keep its original tree whole.
+            if (session.state === SESSION_STATES.COMPLETED) {
+                plant.readingPhrases = phrases.map((entry) => ({ ...entry }));
+                plant.updatedAt = timestamp;
+            }
+            return phrase;
+        });
     }
 
     async resetContinuousProgress({ reason = "interrupted" } = {}) {

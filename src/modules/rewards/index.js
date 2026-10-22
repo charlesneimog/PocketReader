@@ -171,6 +171,11 @@ export class RewardsController {
             // persisted state otherwise leaves live TTS uncounted.
             this._ensureAutomaticTree();
         }));
+        this.unsubscribers.push(this.app.eventBus.on(EVENTS.AUDIO_PLAYBACK_START, (payload) => {
+            this._recordReadingPhrase(payload).catch((error) => {
+                console.error("[RewardsController] Reading text could not be saved", error);
+            });
+        }));
         this.unsubscribers.push(this.app.eventBus.on(EVENTS.READING_SESSION_GOAL_REACHED, () => {
             this._completeAutomaticTree();
         }));
@@ -207,6 +212,36 @@ export class RewardsController {
         this.tracker.checkpoint();
         this.tracker.setReadingScreen(false);
         this.gardenDialog.open(state, this.rewardEngine.getSummary(state));
+    }
+
+    _recordReadingPhrase({ index } = {}) {
+        const descriptor = this.adapter.getDocumentDescriptor();
+        const state = this.app.state;
+        const sentenceIndex = Number.isInteger(index) && index >= 0
+            ? index
+            : state.playingSentenceIndex >= 0
+                ? state.playingSentenceIndex
+                : state.currentSentenceIndex;
+        const sentence = state.sentences?.[sentenceIndex];
+        const text = String(sentence?.readableText?.trim() || sentence?.text || "")
+            .trim().replace(/\s+/g, " ");
+        if (!descriptor?.id || !text) return Promise.resolve(null);
+
+        // Capture before awaiting session creation: playback may already have
+        // moved on when the initial automatic tree finishes starting.
+        const phrase = {
+            documentId: descriptor.id,
+            location: descriptor.type === "epub" && sentence.cfi ? sentence.cfi : sentenceIndex,
+            text,
+        };
+        const current = this.sessions.getCurrentSession();
+        if (current?.automatic && current.state === "active" && current.document?.id === descriptor.id) {
+            return this.sessions.recordReadingPhrase(phrase, current.id);
+        }
+        return this._ensureAutomaticTree().then((session) => {
+            if (!session || session.state !== "active" || session.document?.id !== descriptor.id) return null;
+            return this.sessions.recordReadingPhrase(phrase, session.id);
+        });
     }
 
     async _ensureAutomaticTree() {

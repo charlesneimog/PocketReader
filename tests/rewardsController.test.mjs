@@ -2,6 +2,64 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RewardsController } from "../src/modules/rewards/index.js";
 
+function readingPhraseController({ type = "pdf", session = null } = {}) {
+    const recorded = [];
+    const controller = Object.create(RewardsController.prototype);
+    controller.adapter = {
+        getDocumentDescriptor: () => ({ id: "book-1", type }),
+    };
+    controller.app = {
+        state: {
+            currentSentenceIndex: 1,
+            playingSentenceIndex: 0,
+            sentences: [
+                { text: "Original text.", readableText: "  First\nread phrase. ", cfi: "epubcfi(/6/2!/4/2)" },
+                { text: "Next phrase has not played yet." },
+            ],
+        },
+    };
+    controller.sessions = {
+        getCurrentSession: () => session,
+        recordReadingPhrase: async (phrase, sessionId) => recorded.push({ phrase, sessionId }),
+    };
+    return { controller, recorded };
+}
+
+test("playback records its phrase index rather than the next displayed sentence", async () => {
+    const { controller, recorded } = readingPhraseController({
+        session: { id: "tree-1", automatic: true, state: "active", document: { id: "book-1" } },
+    });
+    await controller._recordReadingPhrase({ index: 0 });
+    assert.deepEqual(recorded, [{
+        phrase: { documentId: "book-1", location: 0, text: "First read phrase." },
+        sessionId: "tree-1",
+    }]);
+});
+
+test("the first phrase is captured before automatic tree creation finishes", async () => {
+    const { controller, recorded } = readingPhraseController({ type: "epub" });
+    let finishStarting;
+    controller._ensureAutomaticTree = () => new Promise((resolve) => { finishStarting = resolve; });
+    const pending = controller._recordReadingPhrase({ index: 0 });
+    controller.app.state.sentences[0].readableText = "Changed while starting.";
+    controller.app.state.currentSentenceIndex = 1;
+    finishStarting({ id: "tree-1", state: "active", document: { id: "book-1" } });
+    await pending;
+    assert.deepEqual(recorded, [{
+        phrase: { documentId: "book-1", location: "epubcfi(/6/2!/4/2)", text: "First read phrase." },
+        sessionId: "tree-1",
+    }]);
+});
+
+test("a phrase cannot spill into a different document while its tree starts", async () => {
+    const { controller, recorded } = readingPhraseController();
+    controller._ensureAutomaticTree = async () => ({
+        id: "tree-2", state: "active", document: { id: "book-2" },
+    });
+    await controller._recordReadingPhrase({ index: 0 });
+    assert.deepEqual(recorded, []);
+});
+
 test("continuous TTS resumes a stale automatic reward pause", async () => {
     let resumed = false;
     const controller = Object.create(RewardsController.prototype);

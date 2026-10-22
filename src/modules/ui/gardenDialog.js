@@ -134,6 +134,20 @@ export function reflectionTextForPlant(plant, reflections) {
     return typeof reflection?.text === "string" ? reflection.text.trim() : "";
 }
 
+export function readingTextForPlant(plant, sessions) {
+    const session = plant?.sessionId
+        ? (Array.isArray(sessions) ? sessions : [])
+            .find((entry) => entry.id === plant.sessionId)
+        : null;
+    const phrases = Array.isArray(plant?.readingPhrases)
+        ? plant.readingPhrases
+        : session?.readingPhrases;
+    return (Array.isArray(phrases) ? phrases : [])
+        .map((phrase) => typeof phrase?.text === "string" ? phrase.text : "")
+        .filter((text) => text.trim())
+        .join("\n\n");
+}
+
 export class GardenDialog {
     constructor({ weekStartsOn = 1, minimumRows = 5, now = Date.now, onRemove = null } = {}) {
         this.weekStartsOn = weekStartsOn;
@@ -168,10 +182,17 @@ export class GardenDialog {
                 <div class="rounded-lg bg-slate-100 dark:bg-slate-800 p-3 text-sm text-slate-600 dark:text-slate-300" aria-live="polite">
                     <p data-tooltip>Select a tree for details.</p>
                     <blockquote data-comment class="hidden mt-2 border-l-2 border-primary/50 pl-3 text-left italic whitespace-pre-wrap"></blockquote>
-                    <button type="button" data-remove class="garden-remove-button hidden mt-3 ml-auto items-center justify-center gap-1 rounded-md border border-red-300 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/30">
-                        <span class="material-symbols-outlined text-base" aria-hidden="true">delete</span>
-                        <span>Remove tree</span>
-                    </button>
+                    <div class="mt-3 flex flex-wrap justify-end gap-2">
+                        <button type="button" data-copy class="hidden items-center justify-center gap-1 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white/70 disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-white/10">
+                            <span class="material-symbols-outlined text-base" aria-hidden="true">content_copy</span>
+                            <span data-copy-label>Copy reading text</span>
+                        </button>
+                        <button type="button" data-remove class="garden-remove-button hidden items-center justify-center gap-1 rounded-md border border-red-300 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950/30">
+                            <span class="material-symbols-outlined text-base" aria-hidden="true">delete</span>
+                            <span>Remove tree</span>
+                        </button>
+                    </div>
+                    <p data-copy-status class="hidden mt-2 text-xs"></p>
                 </div>
             </section>`;
         document.body.appendChild(this.dialog);
@@ -188,6 +209,9 @@ export class GardenDialog {
             this._removeSelectedTree().catch((error) => {
                 console.error("[GardenDialog] Failed to remove tree", error);
             });
+        });
+        this.dialog.querySelector("[data-copy]").addEventListener("click", () => {
+            this._copySelectedTreeText();
         });
         this.renderer = new GardenRenderer(this.dialog.querySelector("canvas"), {
             onSelect: (area) => {
@@ -241,12 +265,8 @@ export class GardenDialog {
         const comment = this.dialog.querySelector("[data-comment]");
         const remove = this.dialog.querySelector("[data-remove]");
         if (!area.plant) {
-            this.selectedPlantId = null;
+            this._resetDetails();
             tooltip.textContent = `Cell ${area.cell.x + 1}, ${area.cell.y + 1} is available.`;
-            comment.textContent = "";
-            comment.classList.add("hidden");
-            remove.classList.add("hidden");
-            remove.classList.remove("flex");
             return;
         }
         this.selectedPlantId = area.plant.id;
@@ -255,6 +275,7 @@ export class GardenDialog {
         comment.classList.remove("hidden");
         remove.classList.remove("hidden");
         remove.classList.add("flex");
+        this._updateCopyButton(area.plant);
     }
 
     _resetDetails() {
@@ -267,6 +288,72 @@ export class GardenDialog {
         comment.classList.add("hidden");
         remove.classList.add("hidden");
         remove.classList.remove("flex");
+        this._updateCopyButton(null);
+    }
+
+    _updateCopyButton(plant) {
+        const button = this.dialog.querySelector("[data-copy]");
+        const label = this.dialog.querySelector("[data-copy-label]");
+        const status = this.dialog.querySelector("[data-copy-status]");
+        const hasText = Boolean(readingTextForPlant(plant, this.state?.sessions));
+        button.classList.toggle("hidden", !plant);
+        button.classList.toggle("flex", Boolean(plant));
+        button.disabled = !hasText;
+        button.title = hasText
+            ? "Copy all text read while growing this tree"
+            : "Text was not recorded for this tree.";
+        label.textContent = hasText ? "Copy reading text" : "No recorded text";
+        status.textContent = "";
+        status.classList.add("hidden");
+    }
+
+    async _copySelectedTreeText() {
+        const plantId = this.selectedPlantId;
+        const plant = this.state?.plants?.find((candidate) => candidate.id === plantId);
+        const text = readingTextForPlant(plant, this.state?.sessions);
+        if (!plantId || !text) return false;
+
+        const button = this.dialog.querySelector("[data-copy]");
+        button.disabled = true;
+        let copied = false;
+        try {
+            if (globalThis.navigator?.clipboard?.writeText) {
+                await globalThis.navigator.clipboard.writeText(text);
+                copied = true;
+            }
+        } catch (_) {
+            // Try the selection fallback when clipboard access is unavailable.
+        }
+        if (!copied) copied = this._copyTextUsingSelection(text);
+
+        if (this.selectedPlantId === plantId) {
+            button.disabled = false;
+            const status = this.dialog.querySelector("[data-copy-status]");
+            status.textContent = copied
+                ? "Reading text copied."
+                : "Could not copy reading text. Please try again.";
+            status.classList.remove("hidden");
+        }
+        return copied;
+    }
+
+    _copyTextUsingSelection(text) {
+        const previousFocus = document.activeElement;
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        try {
+            this.dialog.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            return Boolean(document.execCommand?.("copy"));
+        } catch (_) {
+            return false;
+        } finally {
+            textarea.remove();
+            previousFocus?.focus?.({ preventScroll: true });
+        }
     }
 
     async _removeSelectedTree() {
